@@ -1,0 +1,441 @@
+#!/usr/bin/env python3
+"""h7emu.py - run the unpacked HEAVEN7W.EXE (image.bin) in Unicorn with stubbed Win32/DirectX; logs API calls.
+usage: h7emu.py [max_instructions]"""
+import sys,struct,json
+from unicorn import *; from unicorn.x86_const import *
+BASE=0x400000;info=json.load(open('info.json'));img=open('image.bin','rb').read()
+NAMES={int(k,16):v for k,v in info['imports'].items()}
+mu=Uc(UC_ARCH_X86,UC_MODE_32);mu.mem_map(BASE,(len(img)+0xfff)&~0xfff);mu.mem_write(BASE,img)
+STK=0x1000000;mu.mem_map(STK-0x400000,0x400000);mu.mem_map(0x7f000000,0x100000);mu.mem_map(0x20000000,0x10000000)  # heap
+TIB=0x7e000000;mu.mem_map(TIB,0x1000);mu.mem_write(TIB,struct.pack('<III',0xffffffff,STK,STK-0x400000)+b'\0'*12+struct.pack('<I',TIB));mu.msr_write(0xC0000100,TIB)  # FS:0 = SEH chain (MSVC exe)
+R=lambda r:mu.reg_read(r);W=lambda r,v:mu.reg_write(r,v&0xffffffff)
+def rd(a,n=4):return struct.unpack('<I',bytes(mu.mem_read(a,4)))[0] if n==4 else bytes(mu.mem_read(a,n))
+def cs(a):
+    b=b''
+    while a:
+        c=bytes(mu.mem_read(a,1))
+        if c==b'\0':break
+        b+=c;a+=1
+    return b.decode('latin1')
+heap=[0x20000000]
+def alloc(n):
+    a=heap[0];heap[0]+=(n+0xfff)&~0xf;return a
+NARGS={'EndDialog':2,'CloseHandle':1,'CreateThread':6,'DeleteCriticalSection':1,'EnterCriticalSection':1,'LeaveCriticalSection':1,'InitializeCriticalSection':1,'GlobalFree':1,'SetThreadPriority':2,'Sleep':1,'TerminateThread':2,'ClientToScreen':2,'CreateWindowExA':12,'DefWindowProcA':4,'DestroyWindow':1,'DispatchMessageA':1,'GetClientRect':2,'MessageBoxA':4,'OffsetRect':3,'RegisterClassA':1,'SetCursor':1,'ShowWindow':2,'SystemParametersInfoA':4,'ord1':3,'DirectDrawCreate':3}
+log=[];t=[0];DLG={'res':0,'snd':int(__import__('os').environ.get('H7SND','2')),'checks':()}
+VT=[0];STEP=int(__import__('os').environ.get('H7STEP','40'))
+NARGS.update({'GetDC':1,'ReleaseDC':2,'LoadCursorA':2,'RegisterClassA':1,'CreateWindowExA':12,'ShowWindow':2,'UpdateWindow':1,'GetWindowRect':2,'SetWindowPos':7,'timeGetTime':0,'GetMessageA':4,'PeekMessageA':5,'TranslateMessage':1,'DispatchMessageA':1,'DefWindowProcA':4,'PostQuitMessage':1,'MessageBoxA':4,'SetCursor':1,'ShowCursor':1,'ValidateRect':2,'CreateCompatibleBitmap':3,'CreateCompatibleDC':1,'CreateFontA':14,'DeleteDC':1,'DeleteObject':1,'GetDIBits':7,'SelectObject':2,'SetBkMode':2,'SetDIBits':7,'SetTextAlign':2,'SetTextColor':2,'TextOutA':5,'CreateThread':6,'Sleep':1,'WaitForSingleObject':2,'SetThreadPriority':2})
+def ret(n,v=0):   # stdcall return, pop n args
+    sp=R(UC_X86_REG_ESP);r=rd(sp);W(UC_X86_REG_EAX,v);W(UC_X86_REG_EIP,r);W(UC_X86_REG_ESP,sp+4+n*4)
+# COM objects: vtable of fake method addresses 0x7f080000+idx*16, per-interface tag
+com={}
+def mkcom(tag,nm=64):
+    vt=alloc(nm*4);obj=alloc(16);mu.mem_write(obj,struct.pack('<I',vt))
+    for i in range(nm):mu.mem_write(vt+i*4,struct.pack('<I',0x7f080000+i*16))
+    com[obj]=tag;return obj
+DDN=[2,0,0,0,3,4,3,2,4,4,0,2,1,2,1,1,1,1,1,0,2,3]
+SFN=[2,0,0,1,1,5,3,5,2,2,3,2,2,1,1,1,2,1,1,2,1,1,1,2,0,4,1,0,1,2,2,1,1,5,2,2,2,2,2,2]
+FB={'buf':None,'w':512,'h':384,'frames':[],'pal':bytearray(1024)}
+PALN=[2,0,0,1,4,3,4]
+# ---- DirectSound fake (H7AUDIO=1): primary/secondary buffers, Lock/Unlock capture, play cursor set by the audio loop
+AUD=bool(__import__('os').environ.get('H7AUDIO'))
+DS={'buf':0x50000000,'size':0,'play':0,'cap':[],'lock':None,'prim':set(),'playing':0}
+if AUD:mu.mem_map(0x50000000,0x200000)
+def dsapi(idx,tag,this,a):
+    v=0;n=0
+    if tag=='ds':
+        if idx==3:   # CreateSoundBuffer(this,desc,&out,outer)
+            n=3;o=mkcom('dsb');mu.mem_write(a[2],struct.pack('<I',o))
+            fl,sz=rd(a[1]+4),rd(a[1]+8)
+            if fl&1:DS['prim'].add(o)
+            else:DS['size']=sz;DS['obj']=o;print('DS secondary buffer',hex(fl),sz,bytes(mu.mem_read(rd(a[1]+16),18)).hex())
+        elif idx==6:n=2
+    else:
+        if idx==4:   # GetCurrentPosition(this,&play,&write)
+            n=2
+            if a[1]:mu.mem_write(a[1],struct.pack('<I',DS['play']))
+            if a[2]:mu.mem_write(a[2],struct.pack('<I',(DS['play']+0x200)%max(1,DS['size'])))
+        elif idx==9:n=1;mu.mem_write(a[1],struct.pack('<I',1 if DS['playing'] else 0))
+        elif idx==11:   # Lock(this,off,bytes,&p1,&n1,&p2,&n2,flags): ring buffer, two parts on wrap
+            n=7;off,nb=a[1],a[2];n1=min(nb,DS['size']-off);n2=nb-n1
+            mu.mem_write(a[3],struct.pack('<I',DS['buf']+off));mu.mem_write(a[4],struct.pack('<I',n1));mu.mem_write(a[5],struct.pack('<I',DS['buf'] if n2 else 0));mu.mem_write(a[6],struct.pack('<I',n2));DS['lock']=(off,n1,n2)
+        elif idx==12:n=3;DS['playing']=1
+        elif idx==14:n=1
+        elif idx==19:   # Unlock(this,p1,n1,p2,n2): capture what the thread rendered
+            n=4;off,n1,n2=DS['lock'];DS['cap'].append((off,bytes(mu.mem_read(DS['buf']+off,n1))+bytes(mu.mem_read(DS['buf'],n2))))
+        elif idx in (2,18,20):n=0
+        else:print('DSB method',idx)
+    ret(n+1,v)
+# ---- MSVCRT / startup stubs (3s-money is an MSVC exe) ----
+CRTD=alloc(256);SEED=[1];SNIP=0x7e100000;mu.mem_map(SNIP,0x2000)
+def snippet(code):
+    a=SNIP+snippet.o;mu.mem_write(a,code);snippet.o+=len(code)+4;return a
+snippet.o=0
+D4=b'\xdd\x44\x24\x04'
+X87={'sin':D4+b'\xd9\xfe\xc3','cos':D4+b'\xd9\xff\xc3','sqrt':D4+b'\xd9\xfa\xc3','tan':D4+b'\xd9\xf2\xdd\xd8\xc3',
+ 'atan2':D4+b'\xdd\x44\x24\x0c\xd9\xf3\xc3',
+ '_ftol':bytes.fromhex('83ec0c d97c2408 668b442408 660d000c 6689442404 d96c2404 df7c2400 d96c2408 8b442400 8b542404 83c40c c3'.replace(' ',''))}
+X87={k:snippet(v) for k,v in X87.items()}
+SCR=CRTD+128
+def pyfp(f,nargs):   # libm via python double -> st0 through a scratch qword
+    code=snippet(b'\xdd\x05'+struct.pack('<I',SCR)+b'\xc3')
+    def h(a,sp):
+        v=struct.unpack('<%dd'%nargs,bytes(mu.mem_read(sp+4,8*nargs)));mu.mem_write(SCR,struct.pack('<d',f(*v)));W(UC_X86_REG_EIP,code)
+    return h
+def x87h(k):
+    return lambda a,sp:W(UC_X86_REG_EIP,X87[k])
+def _initterm(a,sp):
+    tab=[rd(p) for p in range(a[0],a[1],4)];tab=[p for p in tab if p]
+    code=b''.join(b'\xb8'+struct.pack('<I',p)+b'\xff\xd0' for p in tab)+b'\xc3'
+    mu.mem_write(0x7e101000,code);W(UC_X86_REG_EIP,0x7e101000)
+def _gma(a,sp):
+    av=alloc(16);as_=alloc(16);mu.mem_write(as_,b'3s\0');mu.mem_write(av,struct.pack('<II',as_,0))
+    mu.mem_write(a[0],struct.pack('<I',1));mu.mem_write(a[1],struct.pack('<I',av));mu.mem_write(a[2],struct.pack('<I',av+8));ret(0,0)
+def _rand(a,sp):
+    SEED[0]=(SEED[0]*214013+2531011)&0xffffffff;ret(0,(SEED[0]>>16)&0x7fff)
+def _srand(a,sp):SEED[0]=a[0];ret(0,0)
+def _memset(a,sp):mu.mem_write(a[0],bytes([a[1]&255])*a[2]);ret(0,a[0])
+def _memcpy(a,sp):mu.mem_write(a[0],bytes(mu.mem_read(a[1],a[2])));ret(0,a[0])
+def _strlen(a,sp):
+    n=0
+    while bytes(mu.mem_read(a[0]+n,1))!=b'\0':n+=1
+    ret(0,n)
+import math
+CRT={'__p__fmode':lambda a,sp:ret(0,CRTD),'__p__commode':lambda a,sp:ret(0,CRTD+4),'__set_app_type':lambda a,sp:ret(0,0),
+ '__getmainargs':_gma,'_initterm':_initterm,'_controlfp':lambda a,sp:ret(0,0x9001f),'__setusermatherr':lambda a,sp:ret(0,0),
+ 'malloc':lambda a,sp:ret(0,alloc(a[0])),'??2@YAPAXI@Z':lambda a,sp:ret(0,alloc(a[0])),'free':lambda a,sp:ret(0,0),'??3@YAXPAX@Z':lambda a,sp:ret(0,0),
+ 'memset':_memset,'memcpy':_memcpy,'strlen':_strlen,'rand':_rand,'srand':_srand,'exit':lambda a,sp:(print('exit',a[0]),mu.emu_stop()),'_exit':lambda a,sp:(print('exit',a[0]),mu.emu_stop()),
+ 'GetStartupInfoA':lambda a,sp:(mu.mem_write(a[0],struct.pack('<I',68)),ret(1,0)),
+ 'acos':pyfp(math.acos,1),'pow':pyfp(math.pow,2),'fmod':pyfp(math.fmod,2),'ceil':pyfp(math.ceil,1)}
+for k in X87:CRT[k]=x87h(k)
+# data imports: IAT slot must hold the address of the variable
+for _k,_v in NAMES.items():
+    if _v.endswith('!_acmdln') or _v.endswith('!_adjust_fdiv'):
+        _slot=img.find(struct.pack('<I',_k))
+        assert _slot>=0;_var=alloc(16)
+        if _v.endswith('_acmdln'):_cl=alloc(16);mu.mem_write(_cl,b'3s\0');mu.mem_write(_var,struct.pack('<I',_cl))
+        mu.mem_write(BASE+_slot,struct.pack('<I',_var))
+THR={}
+def api(uc,addr,size,_):
+    sp=R(UC_X86_REG_ESP);a=[rd(sp+4+4*i) for i in range(9)]
+    if 0x7f080000<=addr<0x7f090000:
+        idx=(addr-0x7f080000)//16;this=a[0];tag=com.get(this,'?')
+        if tag in ('ds','dsb'):dsapi(idx,tag,this,a);return
+        TB={'dd':DDN,'pal':PALN}.get(tag,SFN);n=TB[idx] if idx<len(TB) else 0
+        print('COM',tag,idx,[hex(x) for x in a[1:1+n]])
+        v=0
+        if tag=='dd' and idx==5:
+            s=mkcom('pal');mu.mem_write(a[3],struct.pack('<I',s));com[s]='pal';FB['pal'][:]=bytes(mu.mem_read(a[2],1024))
+        elif tag=='pal' and idx==6:
+            FB['pal'][a[2]*4:(a[2]+a[3])*4]=bytes(mu.mem_read(a[4],a[3]*4))
+        elif tag=='dd' and idx==6:
+            s=mkcom('surf');mu.mem_write(a[2],struct.pack('<I',s));com[s]='surf'
+        elif tag=='surf' and idx==22:
+            d0=a[1];mu.mem_write(d0+4,struct.pack('<I',0x100f));mu.mem_write(d0+8,struct.pack('<II',FB['h'],FB['w']));mu.mem_write(d0+72,struct.pack('<IIIIIII',32,0x20,0,8,0,0,0))
+        elif tag=='surf' and idx==12:
+            s=mkcom('surf');mu.mem_write(a[2],struct.pack('<I',s))
+        elif tag=='surf' and idx==25:   # Lock(rect,&desc,flags,0)
+            if FB['buf'] is None:FB['buf']=alloc(FB['w']*FB['h']+4096)
+            mu.mem_write(a[2]+4,struct.pack('<I',0x100f))     # flags
+            mu.mem_write(a[2]+8,struct.pack('<II',FB['h'],FB['w']));mu.mem_write(a[2]+16,struct.pack('<I',FB['w']));mu.mem_write(a[2]+36,struct.pack('<I',FB['buf']));mu.mem_write(a[2]+72,struct.pack('<IIIIIII',32,0x20,0,8,0,0,0))
+        elif tag=='surf' and idx==5 and a[2]!=0 and FB['buf'] is not None:   # Blt(rect,src,..): present
+            _fb=bytes(mu.mem_read(FB['buf'],FB['w']*FB['h']))
+            if os.environ.get('H7FBDIR'):
+                open('%s/fb%d.bin'%(os.environ['H7FBDIR'],len(FB['frames'])),'wb').write(bytes(FB['pal'])+_fb)   # stream frames to disk (long runs)
+            FB['frames'].append((VT[0],_fb,bytes(FB['pal'])));VT[0]+=STEP
+        ret(n+1,v);return
+    n=NAMES.get(addr)
+    if n is None:return
+    if n.split('!')[1] not in ('sqrt','_ftol','sin','cos','tan','atan2','acos','pow','malloc','free','memset','memcpy','rand','SetDIBits','GetDIBits','GetDC','timeGetTime'):print(n,[hex(x) for x in a[:4]])
+    if n.endswith('DirectDrawCreate'):
+        o=mkcom('dd');mu.mem_write(a[1],struct.pack('<I',o));ret(3,0)
+    elif n.endswith('ord1') and AUD:
+        o=mkcom('ds');mu.mem_write(a[1],struct.pack('<I',o));ret(3,0)
+    elif n.endswith('GlobalAlloc'):ret(2,alloc(a[1]))
+    elif n.endswith('GetCommandLineA'):
+        s=alloc(16);mu.mem_write(s,b'h7\0');ret(0,s)
+    elif n.endswith('timeGetTime'):ret(0,VT[0])
+    elif n.endswith('GetModuleHandleA'):ret(1,BASE)
+    elif n.endswith('GetSystemMetrics'):ret(1,1024 if a[0]==0 else 768)
+    elif n.endswith('DialogBoxIndirectParamA'):
+        proc=a[3];ra=rd(sp)
+        code=b'\x6a\x00\x6a\x00\x68\x10\x01\x00\x00\x6a\x01'+b'\xb8'+struct.pack('<I',proc)+b'\xff\xd0'
+        code+=b'\x6a\x00\x6a\x01\x68\x11\x01\x00\x00\x6a\x01'+b'\xb8'+struct.pack('<I',proc)+b'\xff\xd0'
+        code+=b'\xb8\x01\x00\x00\x00\xc2\x14\x00'
+        mu.mem_write(0x7f001000,code);W(UC_X86_REG_EIP,0x7f001000)
+    elif n.endswith('SendDlgItemMessageA'):
+        item,msg=a[1],a[2];v={0x3eb:DLG.get('res',0),0x3ec:DLG.get('snd',0)}.get(item,1 if msg==0xf0 and item in DLG.get('checks',()) else 0);ret(5,v)
+    elif n.endswith('PeekMessageA'):ret(5,0)
+    elif n.endswith('CreateThread') and AUD:THR.update(fn=a[2],arg=a[3]);ret(6,1);print('thread',hex(a[2]))
+    elif n.split('!')[1] in CRT:CRT[n.split('!')[1]](a,sp)
+    elif n.endswith('ExitProcess'):print('exit',a[0]);uc.emu_stop()
+    else:ret(NARGS.get(n.split('!')[1],0),1)
+mu.hook_add(UC_HOOK_CODE,api,begin=0x7f000000,end=0x7f0fffff)
+import collections
+RING=collections.deque(maxlen=40)
+import os
+if os.environ.get('H7RING'):mu.hook_add(UC_HOOK_CODE,lambda uc,a,sz,_:RING.append(a),begin=BASE,end=BASE+0x30000)
+if os.environ.get('H7COV'):
+    COV={}
+    def cvh(uc,a,sz,_):COV[a]=max(COV.get(a,0),sz)
+    mu.hook_add(UC_HOOK_BLOCK,cvh,begin=BASE,end=BASE+0x30000)
+if os.environ.get('H7PROF'):
+    import collections
+    PROF=collections.Counter()
+    mu.hook_add(UC_HOOK_BLOCK,lambda uc,a,sz,_:PROF.update({a:sz}),begin=BASE,end=BASE+0x30000)
+if os.environ.get('H7CALLS'):
+    from capstone import Cs,CS_ARCH_X86,CS_MODE_32
+    from capstone.x86 import X86_OP_REG,X86_OP_MEM
+    import collections
+    CT=collections.Counter()
+    cs_=Cs(CS_ARCH_X86,CS_MODE_32);cs_.detail=True
+    code_=img[0x1000:0x1d000];RM={}
+    from unicorn.x86_const import UC_X86_REG_EAX
+    def reg(r):return cs_.reg_name(r)
+    regmap={'eax':UC_X86_REG_EAX,'ebx':UC_X86_REG_EBX,'ecx':UC_X86_REG_ECX,'edx':UC_X86_REG_EDX,'esi':UC_X86_REG_ESI,'edi':UC_X86_REG_EDI,'ebp':UC_X86_REG_EBP,'esp':UC_X86_REG_ESP}
+    sites={}
+    for i in cs_.disasm(code_,0x401000):
+        if i.mnemonic=='call' and i.operands and i.operands[0].type in (X86_OP_REG,X86_OP_MEM):sites[i.address]=i
+    def mk(i):
+        o=i.operands[0]
+        if o.type==X86_OP_REG:return lambda:R(regmap[reg(o.reg)])
+        m=o.mem
+        def f():
+            a=m.disp
+            if m.base:a+=R(regmap[reg(m.base)])
+            if m.index:a+=R(regmap[reg(m.index)])*m.scale
+            return rd(a&0xffffffff)
+        return f
+    ev={a:mk(i) for a,i in sites.items()}
+    def hk(uc,a,sz,_):
+        try:CT[(a,ev[a]())]+=1
+        except Exception:pass
+    for a in ev:mu.hook_add(UC_HOOK_CODE,hk,begin=a,end=a)
+    print('indirect call sites',len(ev))
+if os.environ.get('H7SCRIPT'):
+    SCR=[];cur=[None]
+    def pre(uc,a,sz,_):
+        cur[0]=[R(UC_X86_REG_EDI),R(UC_X86_REG_EAX)]
+    def post(uc,a,sz,_):
+        if cur[0]:SCR.append((cur[0][0],cur[0][1],R(UC_X86_REG_EDI)));cur[0]=None
+    mu.hook_add(UC_HOOK_CODE,pre,begin=0x409a35,end=0x409a35)
+    mu.hook_add(UC_HOOK_CODE,post,begin=0x409a37,end=0x409a37)
+if os.environ.get('H7FONT'):
+    FEV=[]
+    def fh(uc,a,sz,_):FEV.append((hex(a),R(UC_X86_REG_EAX)&0xffffffff,hex(R(UC_X86_REG_EDI))))
+    for a in (0x408e8e,0x408e94,0x408eaa,0x408ebd):mu.hook_add(UC_HOOK_CODE,fh,begin=a,end=a)
+if os.environ.get('H7RD'):
+    RD=[]
+    def rh(uc,a,sz,_):
+        RD.append((a,rd(R(UC_X86_REG_ESP)),R(UC_X86_REG_EDI)))
+    for a in (0x407fc0,0x407fd0):mu.hook_add(UC_HOOK_CODE,rh,begin=a,end=a)
+if os.environ.get('H7OBJ'):
+    OBJ={}
+    def oh(uc,a,sz,_):
+        pc=R(UC_X86_REG_EDI)
+        if pc==0x41a400 and 'x' not in OBJ:
+            esi=R(UC_X86_REG_ESI);OBJ['x']=1;OBJ['esi']=esi;OBJ['mem']=bytes(mu.mem_read(esi,0x200));OBJ['ebp']=bytes(mu.mem_read(rd(0x42a3f8),0x100))
+            print('esi',hex(esi),'edi',hex(pc))
+    mu.hook_add(UC_HOOK_CODE,oh,begin=0x409a37,end=0x409a37)
+if os.environ.get('H7TEXT'):
+    TX={'n':0}
+    def surf(r):
+        w,h,p,dp=rd(r+0x18),rd(r+0x1c),rd(r+0x20),rd(r+0x28);st=p>>2
+        return {'w':w,'h':h,'pitch_raw':p,'data':bytes(mu.mem_read(dp,st*h+16)).hex() if 0<w<400 and 0<h<400 and dp else ''}
+    def tin(uc,a,sz,_):
+        if TX['n']>=1:return
+        esi=R(UC_X86_REG_ESI);edi=R(UC_X86_REG_EDI)
+        # layer = edi ; only the first call whose object has a glyph list
+        g=[rd(esi+0x44+4*i) for i in range(40)];gl=[]
+        for x in g:
+            if x==0:break
+            gl.append(x)
+        if not gl or rd(esi+0x3c)<=1:return
+        TX['n']+=1;TX['esi']=esi;TX['edi']=edi
+        TX['obj']=bytes(mu.mem_read(esi,0x44+4*len(gl))).hex();TX['view']=bytes(mu.mem_read(edi,0x60)).hex();TX['before']=surf(edi);TX['gl']=gl
+        TX['glyphs']={hex(x):[surf(x),surf(x+0x200),surf(x+0x400)] for x in set(gl)}
+        TX['ebp18']=rd(rd(0x42a3f8)+0x18)
+    def tout(uc,a,sz,_):
+        if TX['n']==1 and 'after' not in TX and R(UC_X86_REG_ESP)>0:TX['after']=surf(TX['edi']);print('text captured',len(TX['gl']),'glyphs')
+    mu.hook_add(UC_HOOK_CODE,tin,begin=0x409cda,end=0x409cda)
+    mu.hook_add(UC_HOOK_CODE,tout,begin=0x409deb,end=0x409deb)
+if os.environ.get('H7TEX'):
+    import hashlib,pickle
+    TEXH={0x409574,0x408279,0x40828d,0x409ffc,0x40a320,0x409c0f,0x409c7c,0x40a3c3,0x40a42a,0x40a468,0x4082b9,0x40832b}
+    TEXL=[];TEXB={};tcur=[None]
+    def snap():
+        ebp=rd(0x42a3f8);out={};end=rd(ebp+0x44)
+        for o in range(ebp+0x1e0,end,0x200):
+            w,h,p,d24,d28=rd(o+0x18),rd(o+0x1c),rd(o+0x20),rd(o+0x24),rd(o+0x28)
+            if not(0<w<=8192 and 0<h<=8192 and p<=0x100000):continue
+            e={'o':bytes(mu.mem_read(o,0x40)).hex()}
+            for nm,dp,sz in (('d24',d24,p*(h+1)+4),('d28',d28,(p>>2)*(h+1)+4)):
+                if 0x20000000<=dp<0x30000000 and sz<0x2000000:
+                    b=bytes(mu.mem_read(dp,sz));k=hashlib.sha1(b).hexdigest();TEXB[k]=b;e[nm]=[hex(dp),k]
+            out[hex(o)]=e
+        return out
+    def tpre(uc,a,sz,_):
+        h=R(UC_X86_REG_EAX)
+        if h in TEXH:
+            ebp=rd(0x42a3f8)
+            tcur[0]={'h':hex(h),'esi':hex(R(UC_X86_REG_ESI)),'edi':R(UC_X86_REG_EDI),'ebp':ebp,'pre':snap(),'g138':rd(ebp+0x138),'stream':bytes(mu.mem_read(R(UC_X86_REG_EDI),64)).hex()}
+        else:tcur[0]=None
+    def tpost(uc,a,sz,_):
+        if tcur[0]:
+            tcur[0]['edi_end']=R(UC_X86_REG_EDI);tcur[0]['post']=snap();TEXL.append(tcur[0]);tcur[0]=None
+    mu.hook_add(UC_HOOK_CODE,tpre,begin=0x409a35,end=0x409a35)
+    mu.hook_add(UC_HOOK_CODE,tpost,begin=0x409a37,end=0x409a37)
+if os.environ.get('H7EVAL'):
+    EV=[];NF=[0]
+    SNAPS=[int(x) for x in os.environ.get('H7SNAP','1').split(',')];MAXFR=int(os.environ.get('H7MAXFR','300'))
+    def e0(uc,a,sz,_):
+        nF=sum(1 for e in EV if e[0]=='F') if False else NF[0];NF[0]+=1
+        EV.append(('F',R(UC_X86_REG_EBX),len(FB['frames'])))
+        if nF in SNAPS:
+            import zlib;open('/tmp/claude-1000/snap%d.z'%nF,'wb').write(zlib.compress(bytes(mu.mem_read(BASE,len(img)))+bytes(mu.mem_read(0x20000000,heap[0]-0x20000000)),1))
+            json.dump({'heap_end':heap[0],'ebp':rd(0x42a3f8),'esp':R(UC_X86_REG_ESP),'regs':[R(r) for r in (UC_X86_REG_EAX,UC_X86_REG_EBX,UC_X86_REG_ECX,UC_X86_REG_EDX,UC_X86_REG_ESI,UC_X86_REG_EDI,UC_X86_REG_EBP)]},open('/tmp/claude-1000/snap%d.json'%nF,'w'));print('snapshot at F',nF,'heap',hex(heap[0]),flush=True)
+        if len(FB['frames'])>=MAXFR:uc.emu_stop()
+    def e1(uc,a,sz,_):
+        esi=R(UC_X86_REG_ESI);EV.append(('C',esi,rd(esi+0x10),R(UC_X86_REG_EDX)))
+    PS=[int(x) for x in os.environ.get('H7PSNAP','').split(',') if x];PDONE=set();TS=[int(x) for x in os.environ.get('H7TSNAP','').split(',') if x];TDONE=set();BS=[int(x) for x in os.environ.get('H7BSNAP','').split(',') if x];BDONE=set();HS=set();HDONE=set()
+    for it in os.environ.get('H7HSNAP','').split(';'):
+        if it:
+            hx,ks=it.split(':');HS|={(int(hx,16),int(k)) for k in ks.split(',')}
+    def e2(uc,a,sz,_):
+        esi=R(UC_X86_REG_ESI);EV.append(('D',esi,rd(esi+0x30),R(UC_X86_REG_EDI)))
+        k=NF[0]-1
+        hh=rd(esi+0x30)
+        if (hh,k) in HS and (hh,k) not in HDONE:
+            HDONE.add((hh,k));import zlib;open('/tmp/claude-1000/hs%x_%d.z'%(hh,k),'wb').write(zlib.compress(bytes(mu.mem_read(BASE,len(img)))+bytes(mu.mem_read(0x20000000,heap[0]-0x20000000)),1));print('hsnap',hex(hh),k,flush=True)
+        if rd(esi+0x30)==0x408d8c and k in BS and k not in BDONE:
+            BDONE.add(k);import zlib;open('/tmp/claude-1000/bsnap%d.z'%k,'wb').write(zlib.compress(bytes(mu.mem_read(BASE,len(img)))+bytes(mu.mem_read(0x20000000,heap[0]-0x20000000)),1));print('bsnap',k,flush=True)
+        if rd(esi+0x30)==0x409cda and k in TS and k not in TDONE:
+            TDONE.add(k);import zlib;open('/tmp/claude-1000/tsnap%d.z'%k,'wb').write(zlib.compress(bytes(mu.mem_read(BASE,len(img)))+bytes(mu.mem_read(0x20000000,heap[0]-0x20000000)),1));print('tsnap',k,flush=True)
+        if k in PS and k not in PDONE:
+            PDONE.add(k);import zlib;open('/tmp/claude-1000/psnap%d.z'%k,'wb').write(zlib.compress(bytes(mu.mem_read(BASE,len(img)))+bytes(mu.mem_read(0x20000000,heap[0]-0x20000000)),1));print('psnap',k,flush=True)
+    def e3(uc,a,sz,_):
+        esi=R(UC_X86_REG_ESI);EV.append(('3',esi,rd(esi+0xbc)))
+    mu.hook_add(UC_HOOK_CODE,e2,begin=0x40b247,end=0x40b247)
+    mu.hook_add(UC_HOOK_CODE,e3,begin=0x40b19c,end=0x40b19c)
+    mu.hook_add(UC_HOOK_CODE,e0,begin=0x409a50,end=0x409a50)
+    for a in (0x409b94,0x409bc4):mu.hook_add(UC_HOOK_CODE,e1,begin=a,end=a)
+if AUD:
+    DLG['snd']=0
+    mu.hook_add(UC_HOOK_CODE,lambda uc,a,sz,_:uc.emu_stop(),begin=0x401252,end=0x401252)
+W(UC_X86_REG_ESP,STK-0x100)
+# return address -> ExitProcess stub
+mu.mem_write(STK-0x100,struct.pack('<I',0x7f000040))
+
+AK=[0];RATE=44100;CTX=0x43221c;ST=0x7d000000
+mu.mem_map(ST,0x100000)
+def audio_iter():
+    """ideal 25 ms thread: one loop body (0xe184..0xe22a); play cursor = elapsed virtual time * 176400 B/s"""
+    AK[0]+=1;DS['play']=(int(AK[0]*25*RATE/1000)*4)%DS['size']
+    sp=ST+0xff000;mu.mem_write(sp,struct.pack('<I',0x7f0ffff0));mu.mem_write(0x7f0ffff0,b'\xc3')
+    W(UC_X86_REG_ESP,sp);W(UC_X86_REG_EBX,CTX);mu.mem_write(CTX+0x14,b'\0'*8);mu.mem_write(CTX+0x1c,b'\0'*8)
+    mu.emu_start(0x40e184,0x40e22a)
+NZ=[0]
+try:
+    TOT=int(sys.argv[1]) if len(sys.argv)>1 else 3000000;pc=info['oep'];done=0
+    while done<TOT:
+        mu.emu_start(pc,0,count=min(20000000,TOT-done));done+=20000000;pc=R(UC_X86_REG_EIP)
+        print('PROGRESS',done//1000000,'M eip',hex(pc),'frames',len(FB['frames']),flush=True)
+        if len(FB['frames'])>=int(os.environ.get('H7MAXFR','400')):break
+        if THR and not NZ[0]:
+            sv=[R(r) for r in (UC_X86_REG_ESP,UC_X86_REG_EBX,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI,UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX)];fl=R(UC_X86_REG_EFLAGS)
+            while (AK[0]+1)*25<=VT[0] and not NZ[0]:
+                audio_iter()
+                if any(any(c[1]) for c in DS['cap']):NZ[0]=1;print('audio non-silent after',AK[0]*25,'ms virtual; main frames',len(FB['frames']),flush=True)
+            for r,v in zip((UC_X86_REG_ESP,UC_X86_REG_EBX,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI,UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX),sv):W(r,v)
+            mu.reg_write(UC_X86_REG_EFLAGS,fl)
+        if NZ[0]:break
+except UcError as e:print('ERR',e,hex(R(UC_X86_REG_EIP)),'esp',hex(R(UC_X86_REG_ESP)),'ring',[hex(x) for x in list(RING)[-14:]])
+print('eip',hex(R(UC_X86_REG_EIP)))
+if AUD and THR:
+    import wave,time;k=AK[0]
+    SEC=float(os.environ.get('H7ASEC','30'));T0=time.time()
+    got=lambda:sum(len(c[1]) for c in DS['cap'])
+    while got()<SEC*RATE*4:
+        audio_iter();k=AK[0]
+        if k%200==0:print('iter',k,'got s',got()/RATE/4,'t',round(time.time()-T0),flush=True)
+    pcm=b''.join(c[1] for c in DS['cap'])
+    open('pcm_emu.raw','wb').write(pcm)
+    w=wave.open('pcm_emu.wav','wb');w.setnchannels(2);w.setsampwidth(2);w.setframerate(RATE);w.writeframes(pcm);w.close()
+    print('pcm bytes',len(pcm),'iters',k,'time',time.time()-T0);sys.exit(0)
+
+import numpy as np
+from PIL import Image
+print('frames',len(FB['frames']))
+os.makedirs('out',exist_ok=True)
+for i,(tm,f,pl) in enumerate(FB['frames'][:400]):
+    if f is None:break
+    P=np.frombuffer(pl,np.uint8).reshape(256,4)[:,:3];a=P[np.frombuffer(f,np.uint8).reshape(FB['h'],FB['w'])];Image.fromarray(a).save('out/f%03d_%06d.png'%(i,tm))
+
+if os.environ.get('H7PROF'):
+    json.dump({hex(k):v for k,v in PROF.items()},open('prof_%s.json'%os.environ['H7PROF'],'w'))
+if os.environ.get('H7DUMP'):
+    open('mem_%s.bin'%os.environ['H7DUMP'],'wb').write(bytes(mu.mem_read(BASE,len(img))))
+    ebp=rd(0x42a3f8);print('ebp base',hex(ebp))
+    open('ebp_%s.bin'%os.environ['H7DUMP'],'wb').write(bytes(mu.mem_read(ebp,0x400)))
+
+if os.environ.get('H7CALLS'):
+    json.dump([[hex(a),hex(t),n] for (a,t),n in CT.most_common()],open('calls_%s.json'%os.environ['H7CALLS'],'w'))
+
+if os.environ.get('H7SCRIPT'):
+    json.dump([[hex(a),hex(b),hex(c)] for a,b,c in SCR],open('script_trace.json','w'));print('script ops',len(SCR))
+if os.environ.get('H7GLYPH'):
+    ctx=rd(0x42a3f8);base=rd(ctx+0x4c);print('font base',hex(base),'pool',hex(rd(ctx+0x44)))
+    import numpy as np
+    from PIL import Image
+    N=(rd(ctx+0x44)-base)//0x600;print('records',N)
+    sheet=[]
+    for i in range(min(N,120)):
+        r=base+i*0x600;w,h,pitch,dp=rd(r+0x18),rd(r+0x1c),rd(r+0x20),rd(r+0x28)
+        if i<5:print(i,hex(r),w,h,pitch,hex(dp),bytes(mu.mem_read(r,0x30)).hex())
+        if not(0<w<200 and 0<h<200 and dp>0x1000):continue
+        st=pitch>>2;buf=bytes(mu.mem_read(dp,st*h)) if st*h<100000 else b''
+        if len(buf)<st*h:continue
+        a=np.frombuffer(buf,np.uint8).reshape(h,st)[:,:w]
+        sheet.append(a)
+    print('glyphs',len(sheet))
+    if sheet:
+        W=max(a.shape[1] for a in sheet);H=max(a.shape[0] for a in sheet);cols=16;rows=(len(sheet)+cols-1)//cols
+        img=np.zeros((rows*(H+2),cols*(W+2)),np.uint8)
+        for k,a in enumerate(sheet):
+            y,x=(k//cols)*(H+2),(k%cols)*(W+2);img[y:y+a.shape[0],x:x+a.shape[1]]=np.minimum(255,a.astype(int)*2)
+        Image.fromarray(img).resize((img.shape[1]*3,img.shape[0]*3),Image.NEAREST).save('/tmp/claude-1000/h7/glyphs.png');print(img.shape)
+
+if os.environ.get('H7FONT'):
+    print(len(FEV));print(FEV[:60])
+
+if os.environ.get('H7GLYPH2'):
+    import numpy as np,json
+    ctx=rd(0x42a3f8);base=rd(ctx+0x4c);out={}
+    for code in range(32,124):
+        r=base+code*0x600;w,h,pitch,dp=rd(r+0x18),rd(r+0x1c),rd(r+0x20),rd(r+0x28)
+        if 0<w<300 and 0<h<300 and dp>0x1000:
+            st=pitch>>2;out[code]=[w,h,st,bytes(mu.mem_read(dp,st*h)).hex()]
+    json.dump(out,open('glyph_truth.json','w'));print(len(out),{k:v[:3] for k,v in list(out.items())[:6]})
+
+if os.environ.get('H7RD'):
+    json.dump([[hex(a),hex(b),hex(c)] for a,b,c in RD if 0x41903c<=c<0x42b000],open('rd_trace.json','w'));print('reads',len(RD))
+
+if os.environ.get('H7OBJ') and 'mem' in OBJ:
+    import struct
+    m=OBJ['mem'];f=struct.unpack('<128I',m)
+    for i in range(0,128,8):print(hex(i*4),' '.join('%08x'%x for x in f[i:i+8]))
+    # follow pointers to channel nodes
+    for i,v in enumerate(f):
+        if 0x20000000<=v<0x30000000 and v!=OBJ['esi']:
+            print('ptr at +%#x ->'%(i*4),hex(v),bytes(mu.mem_read(v,0x80)).hex(' ')[:200])
+
+if os.environ.get('H7TEXT'):
+    json.dump(TX,open('text_capture.json','w'));print({k:(v if not isinstance(v,(dict,list)) else '...') for k,v in TX.items()})
+
+if os.environ.get('H7TEX'):
+    pickle.dump((TEXL,TEXB),open('tex_capture.pkl','wb'));print('tex ops',len(TEXL),'blobs',len(TEXB))
+
+if os.environ.get('H7EVAL'):
+    import pickle;pickle.dump(EV,open(os.environ.get('H7OUT','/tmp/claude-1000')+'/ev.pkl','wb'));print('ev',len(EV));pickle.dump([(t,f) for t,f in FB['frames']],open(os.environ.get('H7OUT','/tmp/claude-1000')+'/frames.pkl','wb'))
+
+if os.environ.get('H7COV'):
+    pickle.dump(COV,open(os.environ['H7COV'],'wb'));print('cov blocks',len(COV))
