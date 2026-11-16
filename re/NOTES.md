@@ -17,7 +17,13 @@
 - Message loop at 0xcab9 (PeekMessageA -> Translate/Dispatch, sets 0x431a0c = quit flag on WM_QUIT/ESC), then 0xca60 draws a frame.
 - Plan: same route as h7 (static recompile of the whole x86 with h7's `recomp.py`/x87 runtime, run in wasm) rather than a hand port: the demo is float heavy (fsin/fcos/fpatan/fdiv) and has ~700M instructions of precalc + a software synth, which are cheap to recompile and exactly reproducible.
 
+## Audio capture (done, not yet verified against a second source)
+- `H7AUDIO=1 H7SAVE=1 python3 emu.py 740000000` stops after `CreateThread` (~700M instructions of precalc, ~10 min) and writes `snap.pkl` (19.7 MB, memory + regs + harness state). `H7LOAD=1 H7AUDIO=1 H7ASEC=60 python3 emu.py 4000000000` resumes from it in seconds.
+- Audio thread = ideal 25 ms thread (`audio_iter`: body 0xe184..0xe22a, play cursor = k*25 ms*176400 B/s), interleaved with the main thread between 20M-instruction chunks until the synth is initialised by main (non-silent after 925 ms of virtual time), then run alone. 60 s of PCM in 34 s -> `pcm_emu.raw` / `pcm_emu.wav` (44.1 kHz stereo s16, peak 32500, rms 5.6k-10k).
+- Pitfall: the harness had a leftover h7 hook stopping the CPU at 0x401252; it silently froze the main thread and made the first audio runs silent. Removed.
+- The start offset between video clock and audio is machine dependent (the real thread starts at CreateThread, concurrently with the precalc); document as UNRESOLVED in the README.
+
 ## TODO
-1. Audio mode in `emu.py`: run the thread body at 25 ms steps, capture PCM, check how video timing depends on it (timeGetTime vs sample position).
+1. Music length / loop point (render until the thread stops or repeats).
 2. Golden frames on a virtual clock; palette per frame.
 3. Port (JS), seek, README, WRITEUPs.

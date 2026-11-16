@@ -165,7 +165,7 @@ def api(uc,addr,size,_):
     elif n.endswith('SendDlgItemMessageA'):
         item,msg=a[1],a[2];v={0x3eb:DLG.get('res',0),0x3ec:DLG.get('snd',0)}.get(item,1 if msg==0xf0 and item in DLG.get('checks',()) else 0);ret(5,v)
     elif n.endswith('PeekMessageA'):ret(5,0)
-    elif n.endswith('CreateThread') and AUD:THR.update(fn=a[2],arg=a[3]);ret(6,1);print('thread',hex(a[2]))
+    elif n.endswith('CreateThread') and AUD:THR.update(fn=a[2],arg=a[3]);ret(6,1);print('thread',hex(a[2]));(save_snap() if os.environ.get('H7SAVE') else 0)
     elif n.split('!')[1] in CRT:CRT[n.split('!')[1]](a,sp)
     elif n.endswith('ExitProcess'):print('exit',a[0]);uc.emu_stop()
     else:ret(NARGS.get(n.split('!')[1],0),1)
@@ -320,10 +320,26 @@ if os.environ.get('H7EVAL'):
     for a in (0x409b94,0x409bc4):mu.hook_add(UC_HOOK_CODE,e1,begin=a,end=a)
 if AUD:
     DLG['snd']=0
-    mu.hook_add(UC_HOOK_CODE,lambda uc,a,sz,_:uc.emu_stop(),begin=0x401252,end=0x401252)
 W(UC_X86_REG_ESP,STK-0x100)
 # return address -> ExitProcess stub
 mu.mem_write(STK-0x100,struct.pack('<I',0x7f000040))
+
+import pickle,numpy as np
+REGS=[UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX,UC_X86_REG_EBX,UC_X86_REG_ESP,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI,UC_X86_REG_EIP,UC_X86_REG_EFLAGS]
+def regions():
+    r=[(BASE,(len(img)+0xfff)&~0xfff),(STK-0x400000,0x400000),(0x20000000,(heap[0]-0x20000000+0xfff)&~0xfff),(TIB,0x1000)]
+    if AUD:r.append((0x50000000,0x200000))
+    return r
+def save_snap(fn='snap.pkl'):
+    d={'mem':[(a,bytes(mu.mem_read(a,n))) for a,n in regions()],'regs':[R(r) for r in REGS],'heap':heap[0],'com':dict(com),
+       'DS':{k:v for k,v in DS.items()},'seed':SEED[0],'vt':VT[0],'thr':dict(THR),'fbbuf':FB['buf'],'fbpal':bytes(FB['pal']),'nframes':len(FB['frames'])}
+    pickle.dump(d,open(fn,'wb'),protocol=4);print('snapshot saved',fn,flush=True)
+def load_snap(fn='snap.pkl'):
+    d=pickle.load(open(fn,'rb'))
+    for a,b in d['mem']:mu.mem_write(a,b)
+    for r,v in zip(REGS,d['regs']):mu.reg_write(r,v)
+    heap[0]=d['heap'];com.clear();com.update(d['com']);DS.clear();DS.update(d['DS']);SEED[0]=d['seed'];VT[0]=d['vt'];THR.update(d['thr']);FB['buf']=d['fbbuf'];FB['pal'][:]=d['fbpal']
+    FB['frames']+=[None]*d['nframes'];return d['regs'][8]
 
 AK=[0];RATE=44100;CTX=0x43221c;ST=0x7d000000
 mu.mem_map(ST,0x100000)
@@ -335,10 +351,12 @@ def audio_iter():
     mu.emu_start(0x40e184,0x40e22a)
 NZ=[0]
 try:
-    TOT=int(sys.argv[1]) if len(sys.argv)>1 else 3000000;pc=info['oep'];done=0
+    CH=int(os.environ.get('H7CHUNK','20000000'));TOT=int(sys.argv[1]) if len(sys.argv)>1 else 3000000;pc=info['oep'];done=0
+    if os.environ.get('H7LOAD'):pc=load_snap();print('loaded snapshot, eip',hex(pc),flush=True)
     while done<TOT:
-        mu.emu_start(pc,0,count=min(20000000,TOT-done));done+=20000000;pc=R(UC_X86_REG_EIP)
+        mu.emu_start(pc,0,count=min(CH,TOT-done));done+=CH;pc=R(UC_X86_REG_EIP)
         print('PROGRESS',done//1000000,'M eip',hex(pc),'frames',len(FB['frames']),flush=True)
+        if os.environ.get('H7RING'):print('ring',[hex(x) for x in list(RING)[-24:]],flush=True)
         if len(FB['frames'])>=int(os.environ.get('H7MAXFR','400')):break
         if THR and not NZ[0]:
             sv=[R(r) for r in (UC_X86_REG_ESP,UC_X86_REG_EBX,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI,UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX)];fl=R(UC_X86_REG_EFLAGS)
@@ -364,7 +382,7 @@ if AUD and THR:
 
 import numpy as np
 from PIL import Image
-print('frames',len(FB['frames']))
+print('frames',len(FB['frames']));print('ring',[hex(x) for x in list(RING)[-30:]]) if os.environ.get('H7RING') else 0
 os.makedirs('out',exist_ok=True)
 for i,(tm,f,pl) in enumerate(FB['frames'][:400]):
     if f is None:break
