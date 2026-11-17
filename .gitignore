@@ -1,0 +1,13 @@
+re/fb/
+re/fba/
+re/fbs/
+re/fbv/
+re/out/
+re/unp/
+re/*.log
+re/snap.pkl
+re/image.bin
+re/img*.dis
+re/pcm_emu.*
+re/fx13.raw
+__pycache__/

@@ -18,6 +18,6 @@ export function tex(t, len5c = 0, noText = true) {          // t = centiseconds;
   }
   return T;
 }
-export function frame(ms, out) { const T = tex(Math.floor((ms - 40) / 10)); for (let i = 0; i < out.length; i++) out[i] = T[W[i]]; return out; }
+export function frame(ms, out, len5c = 0, noText = true) { const T = tex(Math.floor((ms - 40) / 10), len5c, noText); for (let i = 0; i < out.length; i++) out[i] = T[W[i]]; return out; }
 // Palette (0x40c691(v)): indices < v white, the rest black; v = clamp(trunc(320 - 0.02 * (ms - t0)), 100, 255) while the music position is < 0x500; t0 = clock when slot 3 was enabled (800 ms in the golden run).
 export const level = (ms, t0 = 800) => Math.max(100, Math.min(255, Math.trunc(320 - 0.02 * (ms - t0))));

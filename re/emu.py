@@ -373,6 +373,9 @@ try:
         if NZ[0] and not SYNC:break
 except UcError as e:print('ERR',e,hex(R(UC_X86_REG_EIP)),'esp',hex(R(UC_X86_REG_ESP)),'ring',[hex(x) for x in list(RING)[-14:]])
 print('eip',hex(R(UC_X86_REG_EIP)))
+if os.environ.get('H7PTRDUMP'):   # "addr,count,size,outfile": count pointers at addr, dump size bytes behind each
+    _a,_n,_s,_f=os.environ['H7PTRDUMP'].split(',');_ps=struct.unpack('<%dI'%int(_n),bytes(mu.mem_read(int(_a,16),4*int(_n))));print('ptrs',[hex(p) for p in _ps])
+    open(_f,'wb').write(b''.join(bytes(mu.mem_read(p,int(_s,16))) for p in _ps))
 if AUD and THR:
     import wave,time;k=AK[0]
     SEC=float(os.environ.get('H7ASEC','30'));T0=time.time()

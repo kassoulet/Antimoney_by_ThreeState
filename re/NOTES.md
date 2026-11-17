@@ -47,3 +47,23 @@
 - Palette (0x40c691(v)): entries < v white, others black; v = clamp(320 - 0.002*10*(now-t0), 100, 255) while time word < 0x500.
 - Slot 3 ported: `web/fx/fx03.js`, check `node re/fxcheck03.mjs` (needs `re/fbv`): 99.4% of pixels = ours + grain (0..31); 0.6% outside (likely x87 80-bit vs double intermediates in the ftol truncations; not yet analysed).
 - GDI text (Impact/Arial strings at 0x411010..0x4110a0, rendered by 0x40bd9a) is blank in the golden run: effects that use it (slot 3 text overlay, slot 24 texture, slot 16) can only be approximated in the port (canvas fillText).
+
+## Slot 13 (images)
+- `re/fx13.raw` = the four images dumped from a live resume run (`H7PTRDUMP=0x42739c,4,196608,re/fx13.raw`), copied to `web/assets/fx13.bin`. `web/fx/fx13.js`: saturating add of image[idx] (idx from cmd 6: 0@3072, 1@3104, 2@3328, 3@3360, off @3456).
+- Check against fbs: gold >= image for ~100% of pixels in the frames where that image is active (e.g. fbs N=327..336 image 0, N=339..348 image 1); other slots (11, 3D) add on top, so only an inequality is testable.
+
+## Compositor (web/fx/compose.js)
+- `node re/fxcheck_compose.mjs [step]` compares against fbs (binary white/black agreement + palette level). Scene 1: 99-100% agree; scenes with unported slots (5/22 at orders 4-5 etc.) drop to 15-60%.
+- Palette in fbs: scene-1 fade is 5 below ours on the 250 ms grid (gold uses the clock of the previous Blt; harmless). Slot 4 era: per-frame random level 100..197. Order 12-14: 255 -> 130 in 1 s from 76.0 s. Slot 15 (141.75-154 s): 159.5+59.5*cos(2pi(t-143.1)/6.25). Slot 18: linear 100 -> 255 from 166.8 s at 27/s (fitted).
+- Script times above 63 in the low byte (e.g. 0xd80) are numeric thresholds, reached at the next order boundary.
+
+## Slot 3 params (done) and unexplained region
+- Commands: 6 -> [0x42725c] (vertical line length), 7 -> [0x427269] text-overlay flag (p==0 clears), 8 -> renders text into texture [0x427270] (3584x200, then `(b&1)*0x65`). Wired in compose.js; `fxcheck_compose.mjs` now 99-100% for orders 14-16.
+- fbs frames use the previous Blt's clock (250 ms back): the check passes ms-210 to the compositor.
+- SOLVED: the orders 18-20 noise floor is slot 22 (see below), not slot 3's text overlay.
+
+## Slot 22 = zoom/glow post-process (0x4068c5, uses its own code, not the 3D engine)
+- init 0x4018f0 -> 0x40688b: LUT buffer 0x100 bytes ([0x42ba20]), defaults step [0x42ba28]=0xfe, float [0x42ba24]=0.14. cmd 6 -> step (ftol), cmd 7 -> float. Frame 0x401900 calls 0x4068c5(&{screen, pitch}) on the finished screen (runs after slots 0..21, before 23/24).
+- Algorithm (`web/fx/fx22.js`): LUT[i]=clamp(ftol(i*f),0,127), LUT[0x80+i]=clamp(ftol((1.1-f)*i),0,127); screen>>=1; four quadrants of 256x192 (centre outwards), per pixel: bilinear sample at fixed-point position (start (w-1)<<8 or w<<8, step S per pixel/row, walking outwards from the centre, IN PLACE) -> c; pixel = min(127, LUT[0x80+c] + LUT[pixel]); finally x2.
+- MMX junk: `punpcklbw mm0,[mem]` keeps the register's old byte as the LOW byte of each word, so samples are (v<<8 | J). J0 = last halved byte (mm0 after the halving loop); J1..3 are x87 leftovers (0 in the oracle). The final x2 loop gives out[p] = 2*s + (out[p-4]>>7). With gold-fed rows the port misses ~0.6% of samples by 1 (large fx, positive slope); full image 80% bytes identical, max diff 6, typical +-2.
+- Oracle: `python3 re/oracle22.py S F prefix` (calls the routine on a test image under Unicorn with a hand-written _ftol), check `node re/fxcheck22.mjs prefix.in prefix.out S F`.
