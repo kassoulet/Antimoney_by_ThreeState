@@ -13,6 +13,7 @@
 | Palette level | Slot 0/3 rules exact; slot 4 (random), 11/13 era ramp, slot 15 pulse and slot 18 final fade are **fitted** to the golden run, not derived. |
 | Other slots | Not ported (slots 4, 5, 10, 11, 12, 14, 15, 16, 17, 18, 23: 3D engine scenes, GDI-text based effects...). Text (Impact/Arial via GDI) is blank in the golden run, so it can only be approximated. |
 | Slot 22 (glow/zoom post-process) | Ported (`web/fx/fx22.js`), checked against the original routine under Unicorn (`re/oracle22.py`, `re/fxcheck22.mjs`): within +-1..3 LSB, about 80% of bytes identical, NOT bit-exact. Cause: the MMX code leaves junk in the low bytes of its 16-bit lanes (registers inherited from earlier x87/MMX code); lane 0 junk is modelled, the rest of it is not. Orders 18-20 now agree 90-99% with the golden frames. |
+| Shared 3D engine (slots 4, 5, 10, 11, 12, ...) | **Partial hand port**, `web/fx/tri.js` + `web/fx/engine3d.js`: triangle filler, angle tables, matrix helpers, normals rotation (bit-exact vs Unicorn oracles), face/vertex normals and projection (within 1 f32 ulp). Missing: camera setup, the draw/clip/shade dispatch (0x40946f...) and every slot's logic; nothing is wired into the player yet. Table in `re/NOTES.md`. |
 | Video/audio offset | Video clock = audio + 800 ms (guess from the golden run; machine dependent in the original). |
 
 ## Files
