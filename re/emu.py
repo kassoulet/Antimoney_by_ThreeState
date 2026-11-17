@@ -349,23 +349,28 @@ def audio_iter():
     sp=ST+0xff000;mu.mem_write(sp,struct.pack('<I',0x7f0ffff0));mu.mem_write(0x7f0ffff0,b'\xc3')
     W(UC_X86_REG_ESP,sp);W(UC_X86_REG_EBX,CTX);mu.mem_write(CTX+0x14,b'\0'*8);mu.mem_write(CTX+0x1c,b'\0'*8)
     mu.emu_start(0x40e184,0x40e22a)
-NZ=[0]
+NZ=[0];POS=[];SYNC=bool(os.environ.get('H7SYNC'))
+if os.environ.get('H7TRACE'):
+    for _a in os.environ['H7TRACE'].split(','):
+        _a=int(_a,16);mu.hook_add(UC_HOOK_CODE,lambda uc,ad,sz,_:print('HIT',hex(ad),'fr',len(FB['frames']),flush=True),begin=_a,end=_a)
 try:
     CH=int(os.environ.get('H7CHUNK','20000000'));TOT=int(sys.argv[1]) if len(sys.argv)>1 else 3000000;pc=info['oep'];done=0
     if os.environ.get('H7LOAD'):pc=load_snap();print('loaded snapshot, eip',hex(pc),flush=True)
     while done<TOT:
         mu.emu_start(pc,0,count=min(CH,TOT-done));done+=CH;pc=R(UC_X86_REG_EIP)
+        if SYNC:
+            _e=struct.unpack('<I',bytes(mu.mem_read(0x4c2264,4)))[0];_e and print('POS vt',VT[0],'order',mu.mem_read(_e+0x4ba4,1)[0],'row',mu.mem_read(_e+0x4ba0,1)[0],flush=True)
         print('PROGRESS',done//1000000,'M eip',hex(pc),'frames',len(FB['frames']),flush=True)
         if os.environ.get('H7RING'):print('ring',[hex(x) for x in list(RING)[-24:]],flush=True)
         if len(FB['frames'])>=int(os.environ.get('H7MAXFR','400')):break
-        if THR and not NZ[0]:
+        if THR and (SYNC or (not NZ[0] and not os.environ.get('H7NOINT'))):
             sv=[R(r) for r in (UC_X86_REG_ESP,UC_X86_REG_EBX,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI,UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX)];fl=R(UC_X86_REG_EFLAGS)
-            while (AK[0]+1)*25<=VT[0] and not NZ[0]:
+            while (AK[0]+1)*25<=VT[0] and (SYNC or not NZ[0]):
                 audio_iter()
                 if any(any(c[1]) for c in DS['cap']):NZ[0]=1;print('audio non-silent after',AK[0]*25,'ms virtual; main frames',len(FB['frames']),flush=True)
             for r,v in zip((UC_X86_REG_ESP,UC_X86_REG_EBX,UC_X86_REG_EBP,UC_X86_REG_ESI,UC_X86_REG_EDI,UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_EDX),sv):W(r,v)
             mu.reg_write(UC_X86_REG_EFLAGS,fl)
-        if NZ[0]:break
+        if NZ[0] and not SYNC:break
 except UcError as e:print('ERR',e,hex(R(UC_X86_REG_EIP)),'esp',hex(R(UC_X86_REG_ESP)),'ring',[hex(x) for x in list(RING)[-14:]])
 print('eip',hex(R(UC_X86_REG_EIP)))
 if AUD and THR:
@@ -374,8 +379,11 @@ if AUD and THR:
     got=lambda:sum(len(c[1]) for c in DS['cap'])
     while got()<SEC*RATE*4:
         audio_iter();k=AK[0]
+        if os.environ.get('H7POS'):
+            e=struct.unpack('<I',bytes(mu.mem_read(0x4c2264,4)))[0];POS.append((k*25,mu.mem_read(e+0x4ba0,1)[0],mu.mem_read(e+0x4ba4,1)[0]))
         if k%200==0:print('iter',k,'got s',got()/RATE/4,'t',round(time.time()-T0),flush=True)
     pcm=b''.join(c[1] for c in DS['cap'])
+    if POS:json.dump(POS,open('pos.json','w'))
     open('pcm_emu.raw','wb').write(pcm)
     w=wave.open('pcm_emu.wav','wb');w.setnchannels(2);w.setsampwidth(2);w.setframerate(RATE);w.writeframes(pcm);w.close()
     print('pcm bytes',len(pcm),'iters',k,'time',time.time()-T0);sys.exit(0)

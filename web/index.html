@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><title>3s-money (web port, WIP)</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>:root{color-scheme:dark}body{margin:0;background:#111;color:#ddd;font:14px system-ui;display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px}
+canvas{width:min(100%,640px);aspect-ratio:4/3;background:#000;image-rendering:pixelated}#c{display:flex;gap:8px;width:min(100%,640px);align-items:center}#seek{flex:1}</style>
+<canvas id="cv" width="512" height="384"></canvas>
+<div id="c"><button id="pp">play</button><input id="seek" type="range" min="0" max="1785" value="0"><span id="tm">0.0</span></div>
+<p>Work in progress: only scene 1 (slot 3, first 13 s) is ported; music is the emulator's capture (see README).</p>
+<audio id="au" src="assets/music.ogg" preload="auto"></audio>
+<script type="module" src="player.js"></script>
