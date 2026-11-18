@@ -11,10 +11,10 @@ export function renderScene(objs, cam, buf, rev = 0) {
     const Mo = o.euler ? euler(...o.ang) : o.M;                      // 0x408fbb (else the matrix at obj+0xa0 is left as it is)
     const M = mul(cam.M, Mo);                                         // 0x408f7d -> obj+0xc4
     const T = apply(cam.M, o.pos.map((p, k) => f(p - cam.pos[k])));   // 0x409020
-    const P = project(o.V, M, T, cam.fx, cam.fy, cam.cx, cam.cy).map(p => ({ sx: p.sx, sy: p.sy, z: p.v[2] }));
+    const P = project(o.V, M, T, cam.fx, cam.fy, cam.cx, cam.cy).map(p => ({ sx: p.sx, sy: p.sy, z: p.v[2], x: p.v[0], y: p.v[1] }));
     for (const fc of o.faces) all.push({ v: fc.i.map(i => P[i]), flag3c: fc.flag3c, type: fc.type, wire: o.wire });
   }
-  const q = queueFaces(all, cam.near, rev);
+  const q = queueFaces(all, cam.near, rev, cam);
   for (const fc of q) {
     const [a, b, c] = fc.v;
     if (fc.type === 6) tri(buf, a.sx, a.sy, b.sx, b.sy, c.sx, c.sy, 0x3f, 1);

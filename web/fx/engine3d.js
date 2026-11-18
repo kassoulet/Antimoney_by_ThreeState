@@ -57,13 +57,37 @@ export const faceArea = (a, b, c) => Math.trunc((b.sy - c.sy) * (a.sx - c.sx) - 
 // 0x40946f (no near-plane clipping: faces with 1 or 2 vertices in front of z<near are DROPPED here, the original clips them via 0x40a18b) + 0x40889b (stable LSD radix sort on the
 // unsigned key = ftol(z0+z1+z2), walked from the far end unless rev) + 0x408991 dispatch. Only face type 6 (additive 0x3f triangle) is ported.
 // faces: [{v:[{sx,sy,z}x3], flag3c}], returns the number queued.
-export function queueFaces(faces, near, rev = 0) {
+// Near-plane clip (0x40a18b, Sutherland-Hodgman of the 3-vertex face against the plane z = 1: 0x431318 = (0,0,1,1), "inside" when dist = z-1 >= f32(-0.001) per 0x40a151),
+// single-precision x87 like the rest. Returns the polygon (3 or 4 vertices) as view-space {x,y,z}.
+const THR = f(-0.001);
+function clipPoly(vs) {
+  const dist = v => f(f(f(f(v.z * 1) + f(v.y * 0)) + f(v.x * 0)) - 1), out = [];
+  for (let i = 0; i < 3; i++) {
+    const vi = vs[i], vj = vs[(i + 1) % 3], di = dist(vi), dj = dist(vj), ci = di >= THR ? 1 : 2, cj = dj >= THR ? 1 : 2;
+    if (ci === 1) out.push(vi);
+    if (ci !== cj) {
+      const t = f(di / f(di - dj)), l = k => f(f(f(vj[k] - vi[k]) * t) + vi[k]);
+      out.push({ x: l('x'), y: l('y'), z: l('z') });
+    }
+  }
+  return out;
+}
+const addz = (p, q, r) => Math.trunc(f(f(p + q) + r)) >>> 0;   // ftol of the z sum, summed in the original's order
+// 0x40946f (visibility + queue + clip) + 0x40889b (stable LSD radix sort on the unsigned key = ftol(z sum), walked from the far end unless rev) + 0x408991 dispatch.
+// faces: [{v:[{sx,sy,z,x,y}x3], flag3c}]; cam = {fx,fy,cx,cy} to project clip vertices (without it faces straddling the plane are dropped). Faces with a vertex behind
+// z < near: all three -> dropped; else clipped; clipped faces use the opposite area sign test (area < 0, as compiled) and may become two faces.
+export function queueFaces(faces, near, rev = 0, cam = null) {
   const q = [];
   for (const fc of faces) {
     const [a, b, c] = fc.v; let cl = 0;
     if (a.z < near) cl++; if (b.z < near) cl++; if (c.z < near) cl++;
-    if (cl) continue;   // ponytail: near clip (0x40a18b) not ported: faces with 1-2 vertices behind the plane are dropped like the fully hidden ones
-    if (faceArea(a, b, c) > 0 || fc.flag3c) q.push({ key: Math.trunc(a.z + b.z + c.z) >>> 0, fc });
+    if (!cl) { if (faceArea(a, b, c) > 0 || fc.flag3c) q.push({ key: addz(a.z, b.z, c.z), fc }); continue; }
+    if (cl === 3 || !cam) continue;
+    const P = clipPoly([a, b, c]).map(v => ({ ...v, sx: f(f(f(cam.fx * v.x) / v.z) + cam.cx), sy: f(cam.cy - f(f(cam.fy * v.y) / v.z)) }));
+    if (P.length < 3) continue;
+    // face A = (P0,P1,P2) key (z1+z0)+z2; face B = (P0,P2,P3) key (z3+z2)+z0, as summed by the original
+    const tris = P.length > 3 ? [[P[0], P[1], P[2], addz(P[1].z, P[0].z, P[2].z)], [P[0], P[2], P[3], addz(P[3].z, P[2].z, P[0].z)]] : [[P[0], P[1], P[2], addz(P[1].z, P[0].z, P[2].z)]];
+    for (const [x, y, z, key] of tris) if (faceArea(x, y, z) < 0 || fc.flag3c) q.push({ key, fc: { ...fc, v: [x, y, z] } });
   }
   q.sort((p, r) => p.key - r.key);   // stable, same order as the LSD radix sort
   if (!rev) q.reverse();             // later-queued faces first on equal keys, like the original's backwards walk

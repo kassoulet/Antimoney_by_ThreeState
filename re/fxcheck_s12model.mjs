@@ -2,7 +2,7 @@
 import { frame, makeRand, model, CAM } from '../web/fx/slot12.js'; import { renderScene } from '../web/fx/scene3d.js'; import fs from 'fs'; import { mul, apply, euler, project } from '../web/fx/engine3d.js';
 const D = JSON.parse(fs.readFileSync(process.argv[2])), AX = process.argv[3] ? +process.argv[3] : 0, f = Math.fround, H = h => Buffer.from(h, 'hex');
 const I = D.init, w = H(I.walk), v0 = H(I.v0);
-const S = { walk: [], V0: [], F0: [], nc: 0, cubes: [], V1: [], grid: Uint8Array.from(H(I.grid)), acc: [0, 0, 0], prev: D.T0, done: false, rand: makeRand(I.seed), enabled: true };
+const S = { walk: [], V0: [], F0: [], nc: 0, cubes: [], V1: [], grid: (() => { const g = new Uint8Array(2048); g.set(H(I.grid), 512); return g; })(), acc: [0, 0, 0], prev: D.T0, done: false, rand: makeRand(I.seed), enabled: true };
 for (let i = 0; i < 16; i++) { const o = i * 0x28, r = k => w.readInt32LE(o + k); S.walk.push({ p: w.readFloatLE(o), cur: [r(4), r(8), r(12)], from: [r(16), r(20), r(24)], vf: r(0x1c), vt: r(0x20), ts: r(0x24) }); }
 for (let i = 0; i < v0.length / 0x30; i++) S.V0.push([0, 4, 8].map(k => v0.readFloatLE(0x30 * i + k)));
 let tot = 0;
@@ -19,7 +19,7 @@ for (let k = 1; k <= last; k++) {
   S.V1.flat().forEach((v, i) => v.forEach((c, j) => { if (b.readFloatLE(0x30 * i + 4 * j) !== c) cnt('v1', 1); }));
   const cb = H(m.cubes); if (m.ncubes !== S.nc) cnt('ncubes', 1);
   S.cubes.forEach((c, i) => { if (cb.readInt32LE(24 * i) !== c.t || cb[24 * i + 8] !== c.flag || [0, 1, 2].some(j => cb.readFloatLE(24 * i + 12 + 4 * j) !== c.c[j])) { cnt('cubes', 1); if (process.env.DBG) console.log('cube', i, JSON.stringify(c), cb.readInt32LE(24 * i), cb[24 * i + 8], cb.readFloatLE(24 * i + 12), cb.readFloatLE(24 * i + 16), cb.readFloatLE(24 * i + 20)); } });
-  if (!H(m.grid).equals(Buffer.from(S.grid))) cnt('grid', 1);
+  if (!H(m.grid).equals(Buffer.from(S.grid.slice(512, 512 + 343)))) cnt('grid', 1);
   const ac = H(m.acc); S.acc.forEach((x, i) => { if (ac.readFloatLE([4, 8, 20][i]) !== x) cnt('acc', 1); });
   const o0 = H(m.o0); [0x64, 0x68, 0x6c].forEach((q, i) => { if (o0.readInt32LE(q) !== S.ang[i]) cnt('ang', 1); });
   S.walk.forEach((x, i) => { const o = i * 0x28, g = q => w2(m.walk).readInt32LE(o + q); if (g(4) !== x.cur[0] || g(8) !== x.cur[1] || g(12) !== x.cur[2] || g(0x1c) !== x.vf || g(0x20) !== x.vt || g(0x24) !== x.ts) { cnt('walk', 1); if (process.env.DBG) console.log('walker', i, JSON.stringify(x), 'oracle', g(4), g(8), g(12), g(16), g(20), g(24), g(0x1c), g(0x20), g(0x24)); } });

@@ -14,11 +14,11 @@ export const CAM = { M: Float32Array.of(1, 0, 0, 0, 1, 0, 0, 0, 1), pos: [75, 75
 const SIGNS = [[0x820, 0x900, -1, 1, -1], [0x900, 0x920, 1, -1, -1], [0x920, 0xa00, -1, -1, 1], [0xa00, 0xa20, 1, -1, -1], [0xa20, 0xb00, 1, 1, -1], [0xb00, 0xb20, -1, 1, 1]];
 export const signs = ax => { let s = [1, 1, 1]; for (const [a, b, x, y, z] of SIGNS) if (ax >= a && ax < b) s = [x, y, z]; return s; };
 export function makeRand(seed) { let s = seed | 0; return () => { s = (Math.imul(s, 0x343fd) + 0x269ec3) | 0; return (s >>> 16) & 0x7fff; }; }
-const gi = (x, y, z) => (z * N + y) * N + x, P150 = c => (c - 3) * 150;
+const GB = 512, gi = (x, y, z) => GB + (z * N + y) * N + x, P150 = c => (c - 3) * 150;
 
 // init 0x402a40: 16 walkers on random cells, one obj0 vertex each. now = timeGetTime at init.
 export function init(rand, now) {
-  const S = { walk: [], V0: [], F0: [], nc: 0, cubes: [], V1: [], grid: new Uint8Array(N * N * N), acc: [0, 0, 0], prev: f(now), done: false, rand, enabled: false };
+  const S = { walk: [], V0: [], F0: [], nc: 0, cubes: [], V1: [], grid: new Uint8Array(2048), acc: [0, 0, 0], prev: f(now), done: false, rand, enabled: false };
   for (let i = 0; i < 16; i++) {
     const c = [rand() % 7, rand() % 7, rand() % 7];
     S.walk.push({ p: 0, cur: c.slice(), from: c.slice(), vf: S.V0.length, vt: S.V0.length, ts: now });

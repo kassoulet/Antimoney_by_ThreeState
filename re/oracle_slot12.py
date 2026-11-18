@@ -35,7 +35,7 @@ AX=int(sys.argv[4],0) if len(sys.argv)>4 else None
 if AX is not None: mu.mem_write(0x40c282,bytes([0x66,0xb8,AX&255,AX>>8,0xc3]))   # tracker position stub (slot 12 sign pattern)
 def model():
     n=rd(0x42b400);tab=rd(0x42b428)
-    return dict(walk=bytes(mu.mem_read(0x42b470,0x2a0)).hex(),grid=bytes(mu.mem_read(rd(0x42b3f8),343)).hex(),cubes=bytes(mu.mem_read(rd(0x42b3fc),0x18*n)).hex(),ncubes=n,acc=bytes(mu.mem_read(0x42b6f0,0x18)).hex(),
+    return dict(walk=bytes(mu.mem_read(0x42b470,0x2a0)).hex(),grid=bytes(mu.mem_read(rd(0x42b3f8),343)).hex(),gridx=bytes(mu.mem_read(rd(0x42b3f8)-200,743+200)).hex(),cubes=bytes(mu.mem_read(rd(0x42b3fc),0x18*n)).hex(),ncubes=n,acc=bytes(mu.mem_read(0x42b6f0,0x18)).hex(),
       o0=bytes(mu.mem_read(rd(tab),0x118)).hex(),o1=bytes(mu.mem_read(rd(tab+4),0x118)).hex(),
       v0=bytes(mu.mem_read(rd(rd(tab)+0x44),rd(rd(tab)+0x5c)*0x30)).hex(),f0=bytes(mu.mem_read(rd(rd(tab)+0x50),rd(rd(tab)+0x60)*0x40)).hex(),
       v1=bytes(mu.mem_read(rd(rd(tab+4)+0x44),rd(rd(tab+4)+0x5c)*0x30)).hex(),f1=bytes(mu.mem_read(rd(rd(tab+4)+0x50),rd(rd(tab+4)+0x60)*0x40)).hex(),seed=rd(0x7f001020))
