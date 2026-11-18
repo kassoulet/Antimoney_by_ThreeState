@@ -64,3 +64,54 @@ export function line(buf, x0, y0, x1, y1, col) {
     if (d < 0) { d += 2 * mn; if (xm) a += sx; else b += sy; } else { d += 2 * (mn - mj); a += sx; b += sy; }
   }
 }
+// Port of 0x40b130: textured triangle filler (screen x,y + texture u,v in 0..255 per vertex, 256x256 byte texture, SET pixels, u/v 8.8 fixed point per scanline).
+// Same edge/clipping structure as tri() but every edge carries (u,su,v,sv,x,sx,count) as f32 statics (stale values persist across calls like the original's 0x431788/0x4317a8).
+// Every x87 add/mul is rounded to f32 (single-precision reference FPU).
+const EA = new Float32Array(7), EB = new Float32Array(7);   // [u,su,v,sv,x,sx,n]
+const i32 = x => { x = Math.trunc(x); return x >= -2147483648 && x < 2147483648 ? x : -2147483648; };
+const swapE = () => { for (let k = 0; k < 7; k++) { const t = EA[k]; EA[k] = EB[k]; EB[k] = t; } };
+const adv = t => { for (const E of [EA, EB]) for (const k of [0, 2, 4]) E[k] = f(f(E[k + 1] * t) + E[k]); };   // advance u,v,x by t rows (slope*t + p)
+function edge(E, a, b, ya) {   // a,b = [x,y,u,v]; E = edge from a to b evaluated at row ya
+  const r = f(1 / f(b[1] - a[1]));
+  E[1] = f(f(b[2] - a[2]) * r); E[3] = f(f(b[3] - a[3]) * r); E[5] = f(f(b[0] - a[0]) * r);
+  const t = f(ya - a[1]);
+  E[0] = f(f(t * E[1]) + a[2]); E[2] = f(f(t * E[3]) + a[3]); E[4] = f(f(t * E[5]) + a[0]);
+}
+function texRows(buf, tex, row, cnt) {
+  for (; cnt > 0; cnt--, row += buf.pitch) {
+    const r = f(1 / f(EB[4] - EA[4])), du = f(f(EB[0] - EA[0]) * r), dv = f(f(EB[2] - EA[2]) * r), dui = i32(f(du * 256)), dvi = i32(f(dv * 256));
+    let xl = Math.ceil(EA[4]); const xr = Math.ceil(EB[4]);
+    if (xr >= 0 && xl < buf.w) {
+      const t = f(xl - EA[4]);
+      let u = i32(f(f(f(t * du) + EA[0]) * 256)), v = i32(f(f(f(t * dv) + EA[2]) * 256));
+      if (xl < 0) { u = (u - Math.imul(xl, dui)) | 0; v = (v - Math.imul(xl, dvi)) | 0; xl = 0; }
+      const e = Math.min(xr, buf.w);
+      for (let x = xl; x < e; x++) { buf.d[row + x] = tex[((v & ~0xff) + (u >> 8)) & 0xffff]; u = (u + dui) | 0; v = (v + dvi) | 0; }
+    }
+    for (const k of [0, 2, 4]) { EA[k] = f(EA[k] + EA[k + 1]); EB[k] = f(EB[k] + EB[k + 1]); }
+  }
+}
+export function texTri(buf, tex, x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2) {
+  let a = [x0, y0, u0, v0], b = [x1, y1, u1, v1], c = [x2, y2, u2, v2], t;
+  if (a[1] > b[1]) { t = a; a = b; b = t; }
+  if (a[1] > c[1]) { t = a; a = c; c = t; }
+  if (b[1] > c[1]) { t = b; b = c; c = t; }
+  const ya = Math.ceil(a[1]), yb = Math.ceil(b[1]), yc = Math.ceil(c[1]), n1 = yb - ya, n2 = yc - ya;
+  EA[6] = n1; if (n1 > 0) edge(EA, a, b, ya);
+  EB[6] = n2; if (n2 > 0) edge(EB, a, c, ya);
+  if (ya > buf.h || yc < 0 || (n1 === 0 && n2 === 0)) return;
+  let row = ya >= 0 ? buf.pitch * ya : 0, cnt = n1, sw = false;
+  if (EA[5] > EB[5]) { swapE(); sw = true; }
+  if (yb >= 0) {
+    if (ya < 0) { cnt += ya; adv(-ya); }
+    if (yb > buf.h) cnt += buf.h - yb;
+    if (cnt > 0) { texRows(buf, tex, row, cnt); row += buf.pitch * cnt; }
+  } else adv(yb - ya);
+  const n = yc - yb;
+  if (n > 0) { if (!sw) { EA[6] = n; edge(EA, b, c, yb); } else { EB[6] = n; edge(EB, b, c, yb); } } else if (!sw) EA[6] = n; else EB[6] = n;
+  if (EA[4] > EB[4]) swapE();
+  cnt = n;
+  if (yb < 0) { cnt += yb; adv(-yb); }
+  if (yc > buf.h) cnt += buf.h - yc;
+  if (cnt > 0) texRows(buf, tex, row, cnt);
+}

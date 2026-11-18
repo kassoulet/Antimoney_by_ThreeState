@@ -9,7 +9,7 @@ Status: partial. Ported: slot 3 (star/kaleidoscope), slot 13 (images), grain. Ev
 
 ## Slot 3: star lines through a polar warp
 A 256x256 byte texture is cleared each frame and 120 iterations add (+0x3f saturating) horizontal and vertical lines whose lengths follow `100 - trunc(sin(k*0.01 + a) * -128)` and whose positions follow `log10` spacing (`LG[119]-LG[120-k]`), with amplitudes `sin(a)*40+50`, `cos(a)*40+50`, a = t*0.005 (t = timeGetTime()/10). The screen is that texture read through a 512x384 table of words (radius -> column, angle -> row), which turns the grid of lines into the dotted star / rings. Command 6 fixes the vertical line length (0x42725c), command 7 switches off the horizontal lines and enables a scrolling text overlay (text itself is GDI and blank in our emulation), command 8 renders the overlay text.
-Check against golden frames: 99.4-100% (orders 0-2 and 14-16).
+Check: texture bit-exact vs the original routine under Unicorn (grain off); golden frames agree outside the grain range on every pixel (orders 0-2 and 14-16). Note the loop runs 119 times (the log table pointer stops at index 118), not 120.
 
 ## Slot 13: images
 Four 512x384 pictures built at init from embedded bitmaps (`v = (255-v) & 0x7f`), added with `paddusb` to the screen; command 6 selects the image (0..3 at orders 12-14). We ship the four images dumped from the emulator (`web/assets/fx13.bin`).

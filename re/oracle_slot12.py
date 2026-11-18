@@ -41,17 +41,29 @@ def model():
       v1=bytes(mu.mem_read(rd(rd(tab+4)+0x44),rd(rd(tab+4)+0x5c)*0x30)).hex(),f1=bytes(mu.mem_read(rd(rd(tab+4)+0x50),rd(rd(tab+4)+0x60)*0x40)).hex(),seed=rd(0x7f001020))
 INIT=model()
 dump=[int(x) for x in sys.argv[3].split(',')];res=[]
+import os,random as _r
+T01=os.environ.get('T01')   # T01=0|1: make slot 12's cube material a textured one (face type 0 / 1) with random UVs and a random texture, re-render after the callback
+if T01 is not None:
+    _r.seed(7);TEXB=bytes(_r.randrange(256) for _ in range(65536));TEXA=0x38100000
+    mu.mem_map(TEXA,0x10000);mu.mem_write(TEXA,TEXB)
+    _tab=rd(0x42b428);_mat=rd(rd(rd(_tab+4)+0x50)+0x38)   # material of obj1's first face (faces are pre-built)
+    wr(_mat+0x2c,int(T01));wr(_mat+0x20,TEXA);wr(_mat+0x24,TEXA)
 for k in range(1,max(dump)+1):
     wr(0x7f001010,T0+250*k);mu.mem_write(BUF+0x1000,bytes(W*H))
     call(0x402da0)
+    if T01 is not None:
+        o1=rd(rd(0x42b428)+4);nv1=rd(o1+0x5c);nf1=rd(o1+0x60);T=rd(o1+0x48);F=rd(o1+0x50)
+        for i in range(nv1):mu.mem_write(T+0x30*i+0x20,struct.pack('<ff',f32(((i*37)&255)/256),f32(((i*91)&255)/256)))
+        for i in range(nf1):mu.mem_write(F+0x40*i+0x1c,struct.pack('<6f',*[f32(((i*13+j*71)&255)/256) for j in range(6)]))
+        mu.mem_write(BUF+0x1000,bytes(W*H));call(0x408768,SC);call(0x4087df,SC);call(0x40889b,SC)
     if k in dump:
         cam=rd(SC+0x1c);objs=[]
         tab=rd(0x42b428)
         for j in range(rd(SC+0x24)):
             o=rd(tab+4*j);nv=rd(o+0x5c);nf=rd(o+0x60)
-            objs.append(dict(o=bytes(mu.mem_read(o,0x118)).hex(),V=bytes(mu.mem_read(rd(o+0x44),nv*0x30)).hex(),F=bytes(mu.mem_read(rd(o+0x50),nf*0x40)).hex(),vbase=rd(o+0x44),mats=[rd(rd(o+0x50)+0x40*i+0x38) for i in range(min(nf,1))],nv=nv,nf=nf))
+            objs.append(dict(o=bytes(mu.mem_read(o,0x118)).hex(),V=bytes(mu.mem_read(rd(o+0x44),nv*0x30)).hex(),T=bytes(mu.mem_read(rd(o+0x48),nv*0x30)).hex(),F=bytes(mu.mem_read(rd(o+0x50),nf*0x40)).hex(),vbase=rd(o+0x44),mats=[rd(rd(o+0x50)+0x40*i+0x38) for i in range(min(nf,1))],nv=nv,nf=nf))
         glob=dict(fx=struct.unpack('<ff',bytes(mu.mem_read(0x431770,8))),c=(rd(0x430300),rd(0x4302fc)),near=struct.unpack('<f',bytes(mu.mem_read(SC+0x60,4)))[0],rev=rd(SC+0x50))
         mats=rd(0x43130c);types=[rd(rd(mats+4*i)+0x2c) for i in range(9)]
         res.append(dict(k=k,m=model(),cam=bytes(mu.mem_read(cam,0x100)).hex(),objs=objs,glob=glob,mattypes=types,matptrs=[rd(mats+4*i) for i in range(9)],out=list(bytes(mu.mem_read(BUF+0x1000,W*H)))))
         print('frame',k,'nobj verts',[o['nv'] for o in objs],'faces',[o['nf'] for o in objs],'nonzero',sum(1 for b in res[-1]['out'] if b),flush=True)
-json.dump(dict(init=INIT,T0=T0,frames=res),open(sys.argv[2],'w'))
+json.dump(dict(init=INIT,T0=T0,tex=list(TEXB) if T01 is not None else None,frames=res),open(sys.argv[2],'w'))
