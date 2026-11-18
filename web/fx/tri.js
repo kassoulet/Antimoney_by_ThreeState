@@ -41,3 +41,26 @@ export function tri(buf, x0, y0, x1, y1, x2, y2, col, add) {
   if (yc > buf.h) cnt += buf.h - yc;
   rows(buf, buf.pitch * Math.max(yb, 0), cnt, add, col);
 }
+// Port of 0x407f60 (Cohen-Sutherland clip to x 1..510, y 1..382, f32 intermediates) + 0x408280 (Bresenham, additive byte, pitch fixed 512).
+// Thin line only: the 3x3 brush of the original (flag byte 0x42f2f2, set by another slot) is not ported.
+const code = (x, y) => (y > 382 ? 8 : y < 1 ? 4 : 0) | (x > 510 ? 2 : x < 1 ? 1 : 0);
+export function line(buf, x0, y0, x1, y1, col) {
+  let c0 = code(x0, y0), c1 = code(x1, y1);
+  while (c0 | c1) {
+    if (c0 & c1) return;
+    const c = c0 || c1; let x, y;
+    if (c & 8) { y = 382; x = f((382 - y0) * (x1 - x0) / (y1 - y0) + x0); }
+    else if (c & 4) { y = 1; x = f((1 - y0) * (x1 - x0) / (y1 - y0) + x0); }
+    else if (c & 2) { x = 510; y = f((510 - x0) * (y1 - y0) / (x1 - x0) + y0); }
+    else { x = 1; y = f((1 - x0) * (y1 - y0) / (x1 - x0) + y0); }
+    if (c === c0) { x0 = x; y0 = y; c0 = code(x, y); } else { x1 = x; y1 = y; c1 = code(x, y); }
+  }
+  let a = Math.trunc(x0), b = Math.trunc(y0); const c2 = Math.trunc(x1), d2 = Math.trunc(y1);
+  const dx = Math.abs(c2 - a), dy = Math.abs(d2 - b), xm = dx >= dy, n = (xm ? dx : dy) + 1, mj = xm ? dx : dy, mn = xm ? dy : dx;
+  const sx = c2 < a ? -1 : 1, sy = d2 < b ? -1 : 1;
+  let d = 2 * mn - mj;
+  for (let i = 0; i < n; i++) {
+    const p = b * 512 + a; buf.d[p] = (buf.d[p] + col) & 255;
+    if (d < 0) { d += 2 * mn; if (xm) a += sx; else b += sy; } else { d += 2 * (mn - mj); a += sx; b += sy; }
+  }
+}

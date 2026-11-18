@@ -349,6 +349,10 @@ def audio_iter():
     sp=ST+0xff000;mu.mem_write(sp,struct.pack('<I',0x7f0ffff0));mu.mem_write(0x7f0ffff0,b'\xc3')
     W(UC_X86_REG_ESP,sp);W(UC_X86_REG_EBX,CTX);mu.mem_write(CTX+0x14,b'\0'*8);mu.mem_write(CTX+0x1c,b'\0'*8)
     mu.emu_start(0x40e184,0x40e22a)
+if os.environ.get('H7SNAP12'):   # snapshot at the first call of slot 12's frame callback (all inits done: objects, materials, rand layout)
+    def s12(uc,a,sz,_):
+        save_snap('snap12.pkl');print('snap12 saved',flush=True);os._exit(0)
+    mu.hook_add(UC_HOOK_CODE,s12,begin=0x402da0,end=0x402da0)
 NZ=[0];POS=[];SYNC=bool(os.environ.get('H7SYNC'))
 if os.environ.get('H7TRACE'):
     for _a in os.environ['H7TRACE'].split(','):

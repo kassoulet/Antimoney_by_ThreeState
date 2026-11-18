@@ -11,3 +11,4 @@ re/img*.dis
 re/pcm_emu.*
 re/fx13.raw
 __pycache__/
+re/snap12.pkl

@@ -44,3 +44,31 @@ export function project(P, M, T, fx, fy, cx, cy) {
 // 0x4098e4: env-map UV from the rotated vertex normal ((n+1)*0.5), face shade = trunc(rotated face normal z * 255)
 export const envUV = n => [f((n[0] + 1) * 0.5), f((n[1] + 1) * 0.5)];
 export const faceShade = n => Math.trunc(f(n[2] * 255));
+
+// 0x409aaf: focal data. fov in degrees (cam+0x7c), w,h = cam+0x64/68, aspect = cam+0x74. Returns the globals 0x431770/74 (fx, fy) and 0x430300/0x4302fc (screen centre, ftol).
+export function camera(w, h, fov, aspect) {
+  const x = fov * 0.5 * 0.017453292519943295, t = f(Math.sin(x) / Math.cos(x));
+  return { fx: f(f(w * 0.5) / t), fy: f(f(f(h * 0.5) / aspect) / t), cx: Math.trunc(w * 0.5), cy: Math.trunc(h * 0.5) };
+}
+// 0x40933a: returns ftol((y1-y2)*(x0-x2) - (y0-y2)*(x1-x2)) of the projected face (the original first runs bounding tests that, as compiled, always fall through to this).
+export const faceArea = (a, b, c) => Math.trunc((b.sy - c.sy) * (a.sx - c.sx) - (a.sy - c.sy) * (b.sx - c.sx));
+// 0x40946f (no near-plane clipping: faces with 1 or 2 vertices in front of z<near are DROPPED here, the original clips them via 0x40a18b) + 0x40889b (stable LSD radix sort on the
+// unsigned key = ftol(z0+z1+z2), walked from the far end unless rev) + 0x408991 dispatch. Only face type 6 (additive 0x3f triangle) is ported.
+// faces: [{v:[{sx,sy,z}x3], flag3c}], returns the number queued.
+export function queueFaces(faces, near, rev = 0) {
+  const q = [];
+  for (const fc of faces) {
+    const [a, b, c] = fc.v; let cl = 0;
+    if (a.z < near) cl++; if (b.z < near) cl++; if (c.z < near) cl++;
+    if (cl) continue;   // ponytail: near clip (0x40a18b) not ported: faces with 1-2 vertices behind the plane are dropped like the fully hidden ones
+    if (faceArea(a, b, c) > 0 || fc.flag3c) q.push({ key: Math.trunc(a.z + b.z + c.z) >>> 0, fc });
+  }
+  q.sort((p, r) => p.key - r.key);   // stable, same order as the LSD radix sort
+  if (!rev) q.reverse();             // later-queued faces first on equal keys, like the original's backwards walk
+  return q.map(e => e.fc);
+}
+export function drawFaces(faces, near, buf, tri, rev = 0) {
+  const q = queueFaces(faces, near, rev);
+  for (const { v: [a, b, c] } of q) tri(buf, a.sx, a.sy, b.sx, b.sy, c.sx, c.sy, 0x3f, 1);
+  return q.length;
+}
