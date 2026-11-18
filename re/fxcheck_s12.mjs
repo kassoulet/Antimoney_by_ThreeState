@@ -1,6 +1,6 @@
 // node fxcheck_s12.mjs s12.json (from oracle_slot12.py): wired object pass + queue + type 3/6 draw vs a real slot 12 frame under Unicorn
 import { renderScene } from '../web/fx/scene3d.js'; import fs from 'fs';
-const R = JSON.parse(fs.readFileSync(process.argv[2])), f = Math.fround;
+const R = JSON.parse(fs.readFileSync(process.argv[2])).frames, f = Math.fround;
 const H = h => Buffer.from(h, 'hex'), F32 = (b, o) => b.readFloatLE(o);
 for (const r of R) {
   const cb = H(r.cam), cam = { M: new Float32Array(9).map((_, k) => F32(cb, 0x84 + 4 * k)), pos: [0x40, 0x44, 0x48].map(o => F32(cb, o)), fx: r.glob.fx[0], fy: r.glob.fx[1], cx: r.glob.c[0], cy: r.glob.c[1], near: r.glob.near };

@@ -36,9 +36,11 @@ export const rotateNormals = (M, vn, fn) => ({ vn: vn.map(n => apply(M, n)), fn:
 // 0x4097fe: view-space position = Mc*p + T (obj+0xc4 matrix, obj+0xf4 vector), then perspective: sx = fx*x/z + cx, sy = cy - fy*y/z
 // (0x431770/74 = fx/fy, 0x430300/0x4302fc = screen centre). Returns [{v:[x,y,z], sx, sy}].
 export function project(P, M, T, fx, fy, cx, cy) {
+  // single-precision x87 (see slot12.js): round after every operation, adds in the order z, y, x, then T
+  const dot = (a, b, c, p, q, r, t) => f(f(f(f(a * p) + f(b * q)) + f(c * r)) + t);
   return P.map(p => {
-    const x = f(M[2] * p[2] + M[1] * p[1] + M[0] * p[0] + T[0]), y = f(M[5] * p[2] + M[4] * p[1] + M[3] * p[0] + T[1]), z = f(M[7] * p[1] + M[8] * p[2] + M[6] * p[0] + T[2]);
-    return { v: [x, y, z], sx: f(f(fx * x) / z + cx), sy: f(cy - f(fy * y) / z) };
+    const x = dot(M[2], M[1], M[0], p[2], p[1], p[0], T[0]), y = dot(M[5], M[4], M[3], p[2], p[1], p[0], T[1]), z = dot(M[7], M[8], M[6], p[1], p[2], p[0], T[2]);
+    return { v: [x, y, z], sx: f(f(f(fx * x) / z) + cx), sy: f(cy - f(f(fy * y) / z)) };
   });
 }
 // 0x4098e4: env-map UV from the rotated vertex normal ((n+1)*0.5), face shade = trunc(rotated face normal z * 255)

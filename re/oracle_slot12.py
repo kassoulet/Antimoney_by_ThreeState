@@ -31,6 +31,15 @@ mu.mem_write(0x7f000600,bytes.fromhex('a110100 07fc3'.replace(' ','')))
 mu.mem_write(0x7f000640,bytes.fromhex('a1201000 7f 69c0fd430300 05c39e2600 a3201000 7f c1e810 25ff7f0000 c3'.replace(' ','')))
 wr(0x410130,0x7f000600);wr(0x4100a8,0x7f000640);wr(0x7f001020,SEED)
 T0=1000;wr(0x7f001010,T0);wr(0x42b6f0,1);mu.mem_write(0x42b700,struct.pack('<f',T0))   # slot 12 enabled by command 0 (p=1) at time T0
+AX=int(sys.argv[4],0) if len(sys.argv)>4 else None
+if AX is not None: mu.mem_write(0x40c282,bytes([0x66,0xb8,AX&255,AX>>8,0xc3]))   # tracker position stub (slot 12 sign pattern)
+def model():
+    n=rd(0x42b400);tab=rd(0x42b428)
+    return dict(walk=bytes(mu.mem_read(0x42b470,0x2a0)).hex(),grid=bytes(mu.mem_read(rd(0x42b3f8),343)).hex(),cubes=bytes(mu.mem_read(rd(0x42b3fc),0x18*n)).hex(),ncubes=n,acc=bytes(mu.mem_read(0x42b6f0,0x18)).hex(),
+      o0=bytes(mu.mem_read(rd(tab),0x118)).hex(),o1=bytes(mu.mem_read(rd(tab+4),0x118)).hex(),
+      v0=bytes(mu.mem_read(rd(rd(tab)+0x44),rd(rd(tab)+0x5c)*0x30)).hex(),f0=bytes(mu.mem_read(rd(rd(tab)+0x50),rd(rd(tab)+0x60)*0x40)).hex(),
+      v1=bytes(mu.mem_read(rd(rd(tab+4)+0x44),rd(rd(tab+4)+0x5c)*0x30)).hex(),f1=bytes(mu.mem_read(rd(rd(tab+4)+0x50),rd(rd(tab+4)+0x60)*0x40)).hex(),seed=rd(0x7f001020))
+INIT=model()
 dump=[int(x) for x in sys.argv[3].split(',')];res=[]
 for k in range(1,max(dump)+1):
     wr(0x7f001010,T0+250*k);mu.mem_write(BUF+0x1000,bytes(W*H))
@@ -43,6 +52,6 @@ for k in range(1,max(dump)+1):
             objs.append(dict(o=bytes(mu.mem_read(o,0x118)).hex(),V=bytes(mu.mem_read(rd(o+0x44),nv*0x30)).hex(),F=bytes(mu.mem_read(rd(o+0x50),nf*0x40)).hex(),vbase=rd(o+0x44),mats=[rd(rd(o+0x50)+0x40*i+0x38) for i in range(min(nf,1))],nv=nv,nf=nf))
         glob=dict(fx=struct.unpack('<ff',bytes(mu.mem_read(0x431770,8))),c=(rd(0x430300),rd(0x4302fc)),near=struct.unpack('<f',bytes(mu.mem_read(SC+0x60,4)))[0],rev=rd(SC+0x50))
         mats=rd(0x43130c);types=[rd(rd(mats+4*i)+0x2c) for i in range(9)]
-        res.append(dict(k=k,cam=bytes(mu.mem_read(cam,0x100)).hex(),objs=objs,glob=glob,mattypes=types,matptrs=[rd(mats+4*i) for i in range(9)],out=list(bytes(mu.mem_read(BUF+0x1000,W*H)))))
+        res.append(dict(k=k,m=model(),cam=bytes(mu.mem_read(cam,0x100)).hex(),objs=objs,glob=glob,mattypes=types,matptrs=[rd(mats+4*i) for i in range(9)],out=list(bytes(mu.mem_read(BUF+0x1000,W*H)))))
         print('frame',k,'nobj verts',[o['nv'] for o in objs],'faces',[o['nf'] for o in objs],'nonzero',sum(1 for b in res[-1]['out'] if b),flush=True)
-json.dump(res,open(sys.argv[2],'w'))
+json.dump(dict(init=INIT,T0=T0,frames=res),open(sys.argv[2],'w'))
