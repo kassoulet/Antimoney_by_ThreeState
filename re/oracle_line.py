@@ -26,6 +26,7 @@ def call(addr,*args):
 f32=lambda v:struct.unpack('<f',struct.pack('<f',v))[0];bits=lambda v:struct.unpack('<I',struct.pack('<f',v))[0]
 W,H=512,384;BUF=0x38000000;mu.mem_map(BUF,0x40000+0x2000)
 wr(0x4319f0,BUF+0x1000)
+import os;BRUSH=int(os.environ.get('BRUSH','0'));wr(0x42f2f2,BRUSH)   # BRUSH=1: the 13 pixel brush of slot 18 (flag byte 0x42f2f2)
 # line drawer 0x407f60(x0,y0,x1,y1,bufptr,colour,flag,flag): N random lines (some far outside the clip window), 1 line per run, additive 0x3f
 out=[]
 for k in range(int(sys.argv[2])):
@@ -33,5 +34,5 @@ for k in range(int(sys.argv[2])):
     r=lambda: f32(random.choice([random.uniform(-300,900),random.uniform(0,520),random.uniform(-3,6)]))
     p=[r() for _ in range(4)];col=random.choice([0x3f,0x20,255])
     call(0x407f60,*[bits(v) for v in p],0x4319f0,col,0,0)
-    d=bytes(mu.mem_read(BUF+0x1000,W*H));out.append(dict(p=p,col=col,px=[[i,b] for i,b in enumerate(d) if b]))
+    d=bytes(mu.mem_read(BUF+0x1000,W*H));out.append(dict(p=p,col=col,brush=BRUSH,px=[[i,b] for i,b in enumerate(d) if b]))
 json.dump(out,open(sys.argv[3],'w'));print('ok',sum(len(o['px']) for o in out))

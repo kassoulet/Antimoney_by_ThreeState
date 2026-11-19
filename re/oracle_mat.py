@@ -16,7 +16,8 @@ def call(addr,*args):
     sp=0x7f0f0000;mu.reg_write(UC_X86_REG_ESP,sp)
     mu.mem_write(sp,struct.pack('<I',0x7f000000)+b''.join(struct.pack('<I',a) for a in args))
     mu.emu_start(addr,0x7f000000,count=10000000)
-call(0x4088df)
+call(0x4088df)   # the tables are built at init in the default (extended) precision, like in the reference run
+mu.mem_write(0x7f000700,bytes.fromhex('d92d1007007f'+'c3'));mu.mem_write(0x7f000710,b'\0\0');mu.emu_start(0x7f000700,0x7f000706)   # fldcw [0]: x87 precision = single (24 bit), as in the reference run
 f=lambda v:struct.unpack('<f',struct.pack('<f',v))[0]
 out=dict(sin=list(struct.unpack('<1024f',mu.mem_read(0x43030c,4096))),cos=list(struct.unpack('<1024f',mu.mem_read(0x42f2f8,4096))),objs=[])
 for i in range(N):

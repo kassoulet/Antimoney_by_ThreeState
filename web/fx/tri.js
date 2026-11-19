@@ -42,9 +42,10 @@ export function tri(buf, x0, y0, x1, y1, x2, y2, col, add) {
   rows(buf, buf.pitch * Math.max(yb, 0), cnt, add, col);
 }
 // Port of 0x407f60 (Cohen-Sutherland clip to x 1..510, y 1..382, f32 intermediates) + 0x408280 (Bresenham, additive byte, pitch fixed 512).
-// Thin line only: the 3x3 brush of the original (flag byte 0x42f2f2, set by another slot) is not ported.
+// brush = flag byte 0x42f2f2 (set by slot 18 around its draw): every step plots a 13 pixel diamond (|dx|+|dy| <= 2) instead of one pixel; writes outside the buffer are dropped.
+const DIAMOND = [0, -1, 1, 512, -512, -2, 2, 1024, -1024, -513, 511, -511, 513];
 const code = (x, y) => (y > 382 ? 8 : y < 1 ? 4 : 0) | (x > 510 ? 2 : x < 1 ? 1 : 0);
-export function line(buf, x0, y0, x1, y1, col) {
+export function line(buf, x0, y0, x1, y1, col, brush = false) {
   let c0 = code(x0, y0), c1 = code(x1, y1);
   while (c0 | c1) {
     if (c0 & c1) return;
@@ -60,7 +61,8 @@ export function line(buf, x0, y0, x1, y1, col) {
   const sx = c2 < a ? -1 : 1, sy = d2 < b ? -1 : 1;
   let d = 2 * mn - mj;
   for (let i = 0; i < n; i++) {
-    const p = b * 512 + a; buf.d[p] = (buf.d[p] + col) & 255;
+    const p = b * 512 + a;
+    if (brush) { for (const o of DIAMOND) if (p + o >= 0 && p + o < buf.d.length) buf.d[p + o] = (buf.d[p + o] + col) & 255; } else buf.d[p] = (buf.d[p] + col) & 255;
     if (d < 0) { d += 2 * mn; if (xm) a += sx; else b += sy; } else { d += 2 * (mn - mj); a += sx; b += sy; }
   }
 }

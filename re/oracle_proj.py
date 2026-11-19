@@ -7,6 +7,7 @@ img=open('image.bin','rb').read()
 mu=Uc(UC_ARCH_X86,UC_MODE_32);mu.mem_map(0x400000,(len(img)+0xfff)//0x1000*0x1000);mu.mem_write(0x400000,img)
 mu.mem_map(0x10000000,0x200000);mu.mem_map(0x7f000000,0x100000)
 mu.mem_write(0x7f000000,b'\xf4')
+mu.mem_write(0x7f000700,bytes.fromhex('d92d1007007f'+'c3'));mu.mem_write(0x7f000710,b'\0\0');mu.emu_start(0x7f000700,0x7f000706)   # fldcw [0]: x87 precision = single (24 bit), as in the reference run
 mu.mem_write(0x7f000340,bytes.fromhex('83EC0C'+'D93C24'+'0FB70424'+'660D000C'+'6689442402'+'D96C2402'+'DF7C2404'+'D92C24'+'8B442404'+'8B542408'+'83C40C'+'C3'))
 mu.mem_write(0x4100a0,struct.pack('<I',0x7f000340))
 f=lambda v:struct.unpack('<f',struct.pack('<f',v))[0]
