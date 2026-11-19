@@ -27,3 +27,11 @@
 
 ## Files
 `re/` reverse-engineering (unpack, Unicorn harness, notes), `web/` player, original `3s-money.exe` untouched.
+
+## Write-ups on the site
+
+The write-ups are published as HTML next to the player (`web/writeups/`, generated from `WRITEUP-*.md` and the referenced `figures/`; needs pandoc). After editing a write-up, regenerate with:
+
+```
+../tools/mkwriteups.sh . web    # shared script: demoports/tools/mkwriteups.sh REPO_DIR PUBLISH_SUBDIR
+```

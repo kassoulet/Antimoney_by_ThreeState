@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>3s-money - assembly notes</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+  :root{--bg:#fff;--fg:#1d1d22;--mut:#666;--ac:#c4155a;--code:#f3f3f6;--bd:#d8d8e0}
+  @media (prefers-color-scheme:dark){:root{--bg:#0b0b10;--fg:#d8d8e0;--mut:#9a9aa8;--ac:#ff6a9a;--code:#17171f;--bd:#33333f}}
+  *{box-sizing:border-box}
+  body{margin:0 auto;max-width:62rem;padding:0 16px;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}
+  #wunav{display:flex;gap:16px;flex-wrap:wrap;padding-top:12px;padding-bottom:8px;border-bottom:1px solid var(--bd);font-size:14px}
+  a{color:var(--ac)}
+  h1,h2,h3,h4{line-height:1.25;margin-top:1.8em}
+  img{max-width:100%;height:auto;image-rendering:auto}
+  pre{background:var(--code);border:1px solid var(--bd);border-radius:4px;padding:10px 12px;overflow-x:auto;font-size:13px;line-height:1.4}
+  code{background:var(--code);padding:1px 4px;border-radius:3px;font-size:.92em;overflow-wrap:anywhere}
+  pre code{background:none;padding:0;overflow-wrap:normal}
+  table{border-collapse:collapse;display:block;overflow-x:auto;max-width:100%}
+  td,th{border:1px solid var(--bd);padding:4px 8px}
+  blockquote{border-left:3px solid var(--bd);margin-left:0;padding-left:14px;color:var(--mut)}
+  #TOC{font-size:14px}#TOC ul{padding-left:1.2em}
+  #TOC>ul{padding-left:0;list-style:none}
+  details#toc-box{margin:12px 0}
+  </style>
+</head>
+<body>
+<nav id="wunav"><a href="../index.html">&larr; the demo</a> <a href="WRITEUP-asm.html">asm</a> <a href="WRITEUP-effects.html">effects</a> <a href="https://github.com/kassoulet/Antimoney_by_ThreeState">README on GitHub</a></nav>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#3s-money---assembly-notes"
+id="toc-3s-money---assembly-notes">3s-money - assembly notes</a></li>
+</ul>
+</nav>
+<h1 id="3s-money---assembly-notes">3s-money - assembly notes</h1>
+<ul>
+<li>MSVC, UPX packed; unpacked by running the stub under Unicorn
+(<code>re/unpack_upx_pe.py</code>). OEP 0x40d7e4. Imports: DirectDraw (8
+bpp 512x384, palettised), DirectSound (64 KB looping secondary buffer,
+filled by a thread), GDI (text), MSVCRT.</li>
+<li>Float code is x87 with MSVC's <code>_ftol</code> (0x40d790,
+truncating) everywhere; the cheap trick of the 64k is table-free
+per-frame geometry: sin/cos/log10 evaluated live, line primitives
+<code>hline</code>/<code>vline</code> (0x401180/0x4011d0) doing a
+saturating add by <code>cmp al,0xff</code> after an <code>add</code>
+(carry test, 0x3f step).</li>
+<li>The polar warp (slot 3 init 0x401220) is a one-time table of 512*384
+words:
+<code>trunc(sqrt(x^2+y^2)*255) - (trunc((atan2+pi/2)*4/pi*-255) &lt;&lt; 8)</code>,
+so the per-frame cost is one <code>mov dl,[edx+edi]</code> loop of
+0x30000 pixels (0x401443): texture lookup through a word table, the
+whole effect pass.</li>
+<li>Slot 13 combines images with <code>paddusb</code> (MMX saturating
+add, 16 bytes per iteration, 0x2fc4 iterations); grain uses
+<code>paddb</code> (wrapping) on purpose: wraps produce the
+speckle.</li>
+<li>Sequencing: the main routine (0x40c2f7) polls the tracker row/order,
+compares <code>time &lt;= order&lt;&lt;8|row</code> against the script,
+so script times with a low byte above 63 (0xd80...) trigger at the next
+order boundary.</li>
+<li>Exactness: Unicorn's fsin/fcos return host glibc doubles; JS
+<code>Math.sin/cos</code> differ on ~3.5% of arguments. The reference
+FPU runs in single precision (every add/mul rounds to 24 bits), so the
+port wraps each x87 operation in <code>Math.fround</code>; with that and
+the right loop count (119) slot 3's texture is bit-exact against the
+original routine under Unicorn.</li>
+</ul>
+</body>
+</html>
