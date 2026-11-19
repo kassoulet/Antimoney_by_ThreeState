@@ -22,14 +22,14 @@ export function control(c, T) {
   return R;
 }
 // 0x4055c6 / 0x40578f: cubic Hermite through the key records, evaluated at integer parameter i (key positions 0,10,..90), tension 0.5
-function hermite(R, i) {
-  const k1 = Math.min(Math.floor(i / 10), 9), P = [R[Math.max(k1 - 1, 0)], R[k1], R[Math.min(k1 + 1, 9)], R[Math.min(k1 + 2, 9)]];
+export function hermite(R, i, step = 10, tn = 0.5) {   // keys at positions step*k (slot 17: 160 keys, step 6, tension 1.2)
+  const n = R.length - 1, k1 = Math.min(Math.floor(i / step), n), P = [R[Math.max(k1 - 1, 0)], R[k1], R[Math.min(k1 + 1, n)], R[Math.min(k1 + 2, n)]];
   const a = i - P[1].pos, b = P[2].pos - P[1].pos;
   if (!b) return P[1].p.slice();
   const t = f(a / b), t2 = f(t * t), t3 = f(t2 * t);
   const h00 = f(f(f(2 * t3) - f(t2 * 3)) + 1), h01 = f(f(t2 * 3) + f(t3 * -2)), h10 = f(f(f(t3 - f(2 * t2))) + t), h11 = f(t3 - t2);
   return [0, 1, 2].map(ax => {
-    const v = [P[1].p[ax], P[2].p[ax], f(f(P[2].p[ax] - P[0].p[ax]) * 0.5), f(f(P[3].p[ax] - P[1].p[ax]) * 0.5)];
+    const v = [P[1].p[ax], P[2].p[ax], f(f(P[2].p[ax] - P[0].p[ax]) * tn), f(f(P[3].p[ax] - P[1].p[ax]) * tn)];
     return f(f(f(f(h11 * v[3]) + f(h10 * v[2])) + f(h01 * v[1])) + f(h00 * v[0]));
   });
 }

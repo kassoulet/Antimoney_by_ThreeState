@@ -55,3 +55,5 @@ Slot 3's init (0x401220) allocates a **3584x200** byte texture (0xaf000 bytes) a
 
 ## Not ported
 3D engine scenes (slots 10, 11, 14, 17, 18: shared software engine at 0x407000-0x40bd00, mesh loader 0x407d80, polygon 0x407370, camera 0x409a71), GDI text effects (16, 22, 23, 15, text overlays), rand-driven slot 4. Slots 4, 5, 12, 15 and 18 are ported bit-exact against the original under Unicorn (grain off; slot 15 is a 256x256 voxel terrain marched per column with a sin-driven palette level, slot 18 three Hermite-spline wire curves drawn with a 13-pixel brush, palette ramp `(pos-0x1a00)*2.5+100`; see `re/NOTES.md` Update 6). The text of slots 4 and 18 is approximated with canvas text. The palette level of the 11/13 era is still fitted to the golden run in `web/fx/compose.js`.
+
+* **Slot 22 / 11 / 17**: slot 22's glow LUT is exact once every product is rounded to f32. Slot 11 is a 102-mesh scene drawn with a custom flat triangle (type 199) and a Hermite keyframe camera; slot 17 is a seeded-random particle effect. All three match Unicorn byte for byte. Slots 10, 14, 16, 23 remain unported.

@@ -27,6 +27,7 @@ export function renderScene(objs, cam, buf, rev = 0, brush = false) {   // brush
   for (const fc of q) {
     const [a, b, c] = fc.v;
     if (fc.type === 6) tri(buf, a.sx, a.sy, b.sx, b.sy, c.sx, c.sy, 0x3f, 1);
+    else if (fc.type === 199) tri(buf, a.sx, a.sy, b.sx, b.sy, c.sx, c.sy, 0x82, 0);   // slot 11 custom draw 0x403d30: flat 0x82, pixels SET
     else if (fc.type === 3) wire(buf, fc, a, b, c, brush);
     else if (fc.type === 0 && fc.fuv) {
       const u = fc.fuv.map(x => f(x * 255));

@@ -1,9 +1,9 @@
-import { render, setRows, setMask, setStrips } from './fx/compose.js';
+import { render, setRows, setMask, setStrips, setSlot11 } from './fx/compose.js';
 import { load } from './fx/fx13.js';
 const cv = document.getElementById('cv'), g = cv.getContext('2d'), au = document.getElementById('au'), pp = document.getElementById('pp'), sk = document.getElementById('seek'), tm = document.getElementById('tm');
 const img = g.createImageData(512, 384), px = new Uint32Array(img.data.buffer), idx = new Uint8Array(512 * 384);
 let R = [0]; // first-pass time (ms) of each order*64+row
-Promise.all([fetch('assets/rows.json').then(r => r.json()).then(r => { R = r; setRows(r); }), load('assets/fx13.bin')]);
+Promise.all([fetch('assets/rows.json').then(r => r.json()).then(r => { R = r; setRows(r); }), load('assets/fx13.bin'), fetch('assets/slot11.bin').then(r => r.arrayBuffer()).then(setSlot11)]);
 // slot 4 mask: the original draws "3" (Arial, 255 px, bold; GDI via 0x40bd9a) into a 256x256 buffer and keeps pixels > 0x20; approximated with canvas text
 { const c = document.createElement('canvas'); c.width = c.height = 256; const t = c.getContext('2d'); t.fillStyle = '#fff'; t.font = 'bold 255px Arial, sans-serif'; t.textAlign = 'center'; t.textBaseline = 'top'; t.fillText('3', 128, -30);
   const d = t.getImageData(0, 0, 256, 256).data, m = new Uint8Array(65536); for (let i = 0; i < 65536; i++) m[i] = d[4 * i + 3] > 0x20 ? 0xff : 0; setMask(m); }

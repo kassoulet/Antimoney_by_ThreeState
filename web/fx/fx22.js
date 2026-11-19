@@ -5,7 +5,7 @@ const P = 512, f32 = Math.fround, clamp = v => v < 0 ? 0 : v > 127 ? 127 : v;
 export function glow(A, S = 0xfe, F = f32(0.14), J = null) {
   if (!J) J = [A[0x2fffc] >> 1, 0, 0, 0];   // mm0 byte 0 at entry = lane 0 of the last halved dword (mm1..3: x87 residue of the original, unknown, 0 here)
   const f = f32(F), L = new Uint8Array(0x100);
-  for (let i = 0; i < 128; i++) { L[i] = clamp(Math.trunc(i * f)); L[0x80 + i] = clamp(Math.trunc((1.1 - f) * i)); }
+  for (let i = 0; i < 128; i++) { L[i] = clamp(Math.trunc(f32(i * f))); L[0x80 + i] = clamp(Math.trunc(f32(f32(1.1 - f) * i))); }
   for (let i = 0; i < 0x30000; i++) A[i] >>= 1;
   const s16 = v => v < -32768 ? -32768 : v > 32767 ? 32767 : v;
   const samp = (yf, xf) => {                                   // bilinear in 8.8 on words (v<<8 | junk), as the MMX code

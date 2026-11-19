@@ -135,3 +135,10 @@ Compared with the slot 24 grain OFF (oracles call the routines directly); the gr
 - Slot 4 text mask is the string "3" at 0x41109c (Arial 255), threshold > 0x20. The player approximates it with canvas text; the oracle uses synthetic masks.
 - Whole composite against golden frames (`node re/fxcheck_compose.mjs`): slot 15 era 98.9-100%, slot 18 era 97.6-100%; derived levels differ from the golden by the run's clock offset, which is not known.
 - Not ported: slot 11 = 102-mesh scene, additive type 6, keyframe camera (0x4043b0), needs the look-at product matrix (now ported in slot18.js `lookAt`, flag 0 case only); slot 14 = 300 walker records + 3D scene; slots 10, 16, 17, 23 not examined. Slot 22 (glow) not investigated: the 16-bit MMX lane junk bytes remain unmodelled.
+
+## Update 7
+- Slot 22: LUT needs f32 rounding (`trunc(f32(i*f))`, `trunc(f32(f32(1.1-f)*i))`); then exact vs oracle (S 100..256, F 0.07..1.0).
+- Slot 11: material type 199 -> flat 0x82 SET triangle (0x403d30). Keyframes (26) Hermite tension 0.5 (`slot18.js` `hermite`), y/z swap, level formula in `slot11.js`. Meshes dumped to `web/assets/slot11.bin`. Composite needs a fitted +400 ms start offset.
+- Slot 17: `slot17.js` keys/vertices/step/frame, seeded LCG rand (x*0x343fd+0x269ec3, >>16, &0x7fff). Exact vs oracle.
+- Slot 10 (not ported): init 0x4021a0 builds 64 16x16 byte sprites at 0x4273ec (0x40 - ftol(min(1,d/r)*k)); frame 0x402290 loops t from 0 step 1.5e-4 to 1.371, rotates a point (0x409fd5/0x40a0a2/0x40a006/0x40a04f), size idx = 10 - ftol((z+1)*-32) clamped 1..0x3f, additive paddusb blit 0x402510 clipped x<=0x1f0, y<=0x180; angle from timeGetTime&0xffff * 0.2.
+- Slot 14: 300-walker graph, large, not started.
