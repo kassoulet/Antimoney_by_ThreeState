@@ -36,9 +36,9 @@ export function hermite(R, i, step = 10, tn = 0.5) {   // keys at positions step
 // 300 vertices (3 curves x 100)
 export function vertices(T) { const V = []; for (let c = 0; c < 3; c++) { const R = control(c, T); for (let i = 0; i < 100; i++) V.push(hermite(R, i)); } return V; }
 // look-at matrix of 0x409aaf (flag +0xb4 = 0 path, roll 0): angles from the direction, then the product of the three rotations (cam+0x84)
-export function lookAt(pos, tgt) {
+export function lookAt(pos, tgt, roll = 0) {   // roll in degrees (cam+0x78, a3 = ftol-free f32(roll * -pi/180)); slot 14 uses 30 / 120
   const dx = f(tgt[0] - pos[0]), dy = f(tgt[1] - pos[1]), dz = f(tgt[2] - pos[2]), r = f(Math.sqrt(f(f(dz * dz) + f(dx * dx))));
-  const a1 = f(-Math.atan2(dx, dz)), a2 = f(Math.atan2(dy, r)), a3 = 0, s1 = f(sin(a1)), c1 = f(cos(a1)), s2 = f(sin(a2)), c2 = f(cos(a2)), s3 = f(sin(a3)), c3 = f(cos(a3));
+  const a1 = f(-Math.atan2(dx, dz)), a2 = f(Math.atan2(dy, r)), a3 = roll ? f(roll * f(-0.017453292519943295)) : 0, s1 = f(sin(a1)), c1 = f(cos(a1)), s2 = f(sin(a2)), c2 = f(cos(a2)), s3 = f(sin(a3)), c3 = f(cos(a3));
   const P = f(s3 * s2), Q = f(c3 * s2);
   return Float32Array.of(f(f(c3 * c1) + f(P * s1)), f(s3 * c2), f(f(c3 * s1) - f(P * c1)), f(f(Q * s1) - f(s3 * c1)), f(c3 * c2), f(f(-f(Q * c1)) - f(s3 * s1)), f(-f(c2 * s1)), s2, f(c2 * c1));
 }

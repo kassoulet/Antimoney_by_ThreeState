@@ -81,9 +81,10 @@ code</a></li>
 </nav>
 <h1 id="3s-money-three-state-antimoney-64k---effects">3s-money (Three
 State "antimoney", 64k) - effects</h1>
-<p>Status: partial. Ported: slot 3 (star/kaleidoscope), slot 13
-(images), grain. Everything else is documented below but not ported. See
-<code>README.md</code> for the honest table.</p>
+<p>Status: partial. Ported: slot 3 (star/kaleidoscope, text overlay with
+canvas glyphs), slot 13 (images), grain. Everything else is documented
+below but not ported. See <code>README.md</code> for the honest
+table.</p>
 <h2 id="structure">Structure</h2>
 <ul>
 <li>25 effect "slots" (12-byte records at 0x431838: init, per-frame,
@@ -114,10 +115,29 @@ turns the grid of lines into the dotted star / rings. Command 6 fixes
 the vertical line length (0x42725c), command 7 switches off the
 horizontal lines and enables a scrolling text overlay (text itself is
 GDI and blank in our emulation), command 8 renders the overlay text.
-Check: texture bit-exact vs the original routine under Unicorn (grain
-off); golden frames agree outside the grain range on every pixel (orders
-0-2 and 14-16). Note the loop runs 119 times (the log table pointer
-stops at index 118), not 120.</p>
+Text overlay (mode 7, tail of the frame callback 0x401390): the 3584x200
+byte mask built by GDI (0x65 where text is) is added with byte wrap to
+screen rows 92..291, window 512 px wide, scrolled left by
+<code>ftol(f32((now - t0) * 0.2)) % 3072</code> pixels (200 px/s, 15.36
+s period; t0 = clock of the last frame with the slot disabled). It runs
+on the finished screen at the current clock, while the star is the
+previous frame's texture. The mask is rendered by
+<code>CreateFontA(Impact, height 200, weight 100, ANTIALIASED_QUALITY)</code>
++ <code>TextOutA</code> white on black, <code>GetDIBits</code>, and then
+<code>(b &amp; 1) * 0x65</code>: only the least significant bit of the
+antialiased coverage survives, so glyph interiors (255) are lit and the
+edges are salt-and-pepper noise. Init draws "i am not feeling so coca
+cola today" at x = 512; command 8 (order 18) redraws "work consume sleep
+" x4 at x = 0 (the text is cut at 3584 px). The overlay and the whole
+frame callback are exact against Unicorn with a synthetic mask
+(<code>re/oracle_slot3text.py</code>,
+<code>re/fxcheck_slot3text.mjs</code>, 0 differing bytes in 12 samples
+incl. the 3072 wrap and dt = 0); the glyphs themselves are a canvas
+approximation (Impact 164 px = 200 px cell height / 1.22, baseline at
+165, same LSB rule). Check: texture bit-exact vs the original routine
+under Unicorn (grain off); golden frames agree outside the grain range
+on every pixel (orders 0-2 and 14-16). Note the loop runs 119 times (the
+log table pointer stops at index 118), not 120.</p>
 <h2 id="slot-13-images">Slot 13: images</h2>
 <p>Four 512x384 pictures built at init from embedded bitmaps
 (<code>v = (255-v) &amp; 0x7f</code>), added with <code>paddusb</code>
@@ -257,24 +277,24 @@ Update 5).</li>
 dump <code>web/assets/fx13.bin</code>, 4 x 196,608 bytes.</li>
 </ul>
 <h2 id="not-ported">Not ported</h2>
-<p>3D engine scenes (slot 14 only now; 10, 11, 17, 18 are done: shared
-software engine at 0x407000-0x40bd00, mesh loader 0x407d80, polygon
-0x407370, camera 0x409a71), the slot 3 GDI text overlay, rand-driven
-slot 4. Slots 4, 5, 12, 15 and 18 are ported bit-exact against the
-original under Unicorn (grain off; slot 15 is a 256x256 voxel terrain
-marched per column with a sin-driven palette level, slot 18 three
-Hermite-spline wire curves drawn with a 13-pixel brush, palette ramp
-<code>(pos-0x1a00)*2.5+100</code>; see <code>re/NOTES.md</code> Update
-6). The text of slots 4 and 18 is approximated with canvas text. The
-palette level of the 11/13 era is still fitted to the golden run in
-<code>web/fx/compose.js</code>.</p>
+<p>3D engine scenes (all done, slot 14 included; 10, 11, 17, 18 are
+done: shared software engine at 0x407000-0x40bd00, mesh loader 0x407d80,
+polygon 0x407370, camera 0x409a71), (the slot 3 text overlay is ported,
+glyphs approximated), rand-driven slot 4. Slots 4, 5, 12, 15 and 18 are
+ported bit-exact against the original under Unicorn (grain off; slot 15
+is a 256x256 voxel terrain marched per column with a sin-driven palette
+level, slot 18 three Hermite-spline wire curves drawn with a 13-pixel
+brush, palette ramp <code>(pos-0x1a00)*2.5+100</code>; see
+<code>re/NOTES.md</code> Update 6). The text of slots 4 and 18 is
+approximated with canvas text. The palette level of the 11/13 era is
+still fitted to the golden run in <code>web/fx/compose.js</code>.</p>
 <ul>
 <li><p><strong>Slot 22 / 11 / 17</strong>: slot 22's glow LUT is exact
 once every product is rounded to f32. Slot 11 is a 102-mesh scene drawn
 with a custom flat triangle (type 199) and a Hermite keyframe camera;
 slot 17 is a seeded-random particle effect. All three match Unicorn byte
-for byte. Slots 10, 16 and 23 are now ported too (see below); only slot
-14 and the slot 3 text overlay remain.</p></li>
+for byte. Slots 10, 16 and 23 are now ported too (see below); only the
+slot 3 text overlay remains.</p></li>
 <li><p><strong>Slot 10, sprite ribbon</strong>: init builds 64 16x16
 sprites (sprite k has radius k/8, byte
 <code>0x40 - ftol(min(1, dist/r)*64)</code>). Each frame walks t from 0
@@ -297,6 +317,22 @@ neighbours, modelled). Slot 23 adds 512-wide windows of the lines (value
 0x65, mod 256) scrolling 0.2 px/ms, 16 rows each, starting at row Y.
 Since the emulator's GDI draws nothing, the oracles feed synthetic masks
 (0 differing bytes) and the player uses canvas text.</p></li>
+<li><p><strong>Slot 14, 300 walkers on a graph</strong>: five vertex
+arrays (four straight 75x3 grids and a 150x3 spiral, 24-byte vertices
+with three link pointers) are wired at init, with extra cross-links
+where two arrays come closer than a vertex's first link. 300 walkers hop
+along links: each has a period (<code>rand()%30+20</code> + 80 ms
+scale), and per frame <code>p = (now-ts)/(period+80)</code>; each whole
+unit of p takes one step to the first unused link, the rest interpolates
+the head between the previous and current vertex, and the tail trails it
+by <code>0.7*atan2(...)</code>. Every walker is a line (additive, 0x8f);
+five shaded boxes (colour from the rotated normal's z) sit in the scene,
+and the camera switches pose by tracker position. The trap is precision:
+the x87 is in single precision from the start of init, so even the
+spiral vertices (<code>i*0.0418879</code>) need f32 rounding on every
+op. Bit-exact vs Unicorn (<code>re/oracle_slot14.py</code>); the "heavy
+TRAFFIC reported" overlay is GDI text (blank in the emulator),
+approximated with canvas text in the player.</p></li>
 </ul>
 </body>
 </html>

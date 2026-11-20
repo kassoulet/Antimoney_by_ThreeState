@@ -21,3 +21,10 @@ export function tex(t, len5c = 0, noText = true) {          // t = centiseconds;
 export function frame(ms, out, len5c = 0, noText = true) { const T = tex(Math.floor((ms - 40) / 10), len5c, noText); for (let i = 0; i < out.length; i++) out[i] = T[W[i]]; return out; }
 // Palette (0x40c691(v)): indices < v white, the rest black; v = clamp(trunc(320 - 0.02 * (ms - t0)), 100, 255) while the music position is < 0x500; t0 = clock when slot 3 was enabled (800 ms in the golden run).
 export const level = (ms, t0 = 800) => Math.max(100, Math.min(255, Math.trunc(320 - 0.02 * (ms - t0))));
+// Text overlay (mode 7, cmd 7 p != 0; frame 0x401390 tail 0x40146f..): a 3584x200 byte mask (0x65 where GDI text is) is added with byte wrap (paddb-like, no saturation) to screen rows 92..291,
+// scrolled left by ftol(f32(dt*0.2)) % 3072 px, dt = clock - t0 (t0 = last frame with the slot disabled). Runs on the finished screen at the CURRENT clock (the star above is the previous frame's texture).
+export function overlay(out, ms, t0, M) {
+  const off = Math.trunc(Math.fround(Math.max(0, ms - t0) * Math.fround(0.2))) % 3072;
+  for (let r = 0; r < 200; r++) for (let x = 0; x < 512; x++) { const i = (92 + r) * 512 + x; out[i] = (out[i] + M[r * 3584 + x + off]) & 255; }
+  return out;
+}

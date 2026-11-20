@@ -2,7 +2,7 @@
 // obj = {V:[[x,y,z]], faces:[{i:[a,b,c], flag3c, type}], ang:[ax,ay,az], pos:[x,y,z], euler, wire}; cam = {M: Float32Array(9) (cam+0x84), pos:[x,y,z] (cam+0x40), fx, fy, cx, cy, near}
 // Face types: 6 = additive 0x3f triangle (0x409d67), 3 = wireframe (0x409ed5), 0 = textured with per-face UVs (0x409daf, fc.fuv = 6 floats at face+0x1c), 1 = textured with per-vertex env UVs + wire (0x409e3b, o.UV[i] = transformed vertex +0x20/+0x24).
 // Textured faces use material texture o.tex (256x256 bytes). Clipped textured faces (vertex behind the near plane) are dropped: their UV clipping is not ported.
-import { mul, apply, euler, project } from './engine3d.js';
+import { mul, apply, euler, project, rotateNormals } from './engine3d.js';
 import { queueFaces } from './engine3d.js';
 import { tri, line, texTri } from './tri.js';
 const f = Math.fround;
@@ -21,13 +21,16 @@ export function renderScene(objs, cam, buf, rev = 0, brush = false) {   // brush
     const T = apply(cam.M, o.pos.map((p, k) => f(p - cam.pos[k])));   // 0x409020
     const P = project(o.V, M, T, cam.fx, cam.fy, cam.cx, cam.cy).map(p => ({ sx: p.sx, sy: p.sy, z: p.v[2], x: p.v[0], y: p.v[1] }));
     if (o.UV) P.forEach((p, i) => { p.uv = o.UV[i]; });
-    for (const fc of o.faces) all.push({ v: fc.i.map(i => P[i]), flag3c: fc.flag3c, type: fc.type, wire: o.wire, fuv: fc.fuv, tex: o.tex });
+    const sh = o.shade && rotateNormals(M, o.vn, o.fn).fn.map(n => Math.trunc(f(n[2] * 255)));   // 0x409065 + 0x4098e4: face shade = trunc(rotated normal z * 255), read as a byte
+    o.faces.forEach((fc, k) => all.push({ v: fc.i.map(i => P[i]), flag3c: fc.flag3c, type: fc.type, wire: o.wire, fuv: fc.fuv, tex: o.tex, shade: sh && sh[k] }));
   }
   const q = queueFaces(all, cam.near, rev, cam);
   for (const fc of q) {
     const [a, b, c] = fc.v;
     if (fc.type === 6) tri(buf, a.sx, a.sy, b.sx, b.sy, c.sx, c.sy, 0x3f, 1);
     else if (fc.type === 199) tri(buf, a.sx, a.sy, b.sx, b.sy, c.sx, c.sy, 0x82, 0);   // slot 11 custom draw 0x403d30: flat 0x82, pixels SET
+    else if (fc.type === 200) line(buf, a.sx, a.sy, b.sx, b.sy, 0x8f, false);   // slot 14 walker (0x40589b): additive 0x8f line v0-v1
+    else if (fc.type === 201) tri(buf, a.sx, a.sy, b.sx, b.sy, c.sx, c.sy, fc.shade & 255, 0);   // slot 14 box (0x4060aa): SET triangle, colour = face shade byte
     else if (fc.type === 3) wire(buf, fc, a, b, c, brush);
     else if (fc.type === 0 && fc.fuv) {
       const u = fc.fuv.map(x => f(x * 255));

@@ -1,4 +1,4 @@
-import { render, setRows, setMask, setStrips, setSlot11, setMask16, setStrips23 } from './fx/compose.js';
+import { render, setRows, setMask, setStrips, setSlot11, setMask16, setStrips23, setOverlay14, setText3 } from './fx/compose.js';
 import { load } from './fx/fx13.js';
 const cv = document.getElementById('cv'), g = cv.getContext('2d'), au = document.getElementById('au'), pp = document.getElementById('pp'), sk = document.getElementById('seek'), tm = document.getElementById('tm');
 const img = g.createImageData(512, 384), px = new Uint32Array(img.data.buffer), idx = new Uint8Array(512 * 384);
@@ -20,6 +20,13 @@ setStrips23(['This is me underneath a pile of naked, heaving, sweaty women -- th
   'Less than an  hour after I step off the plane, I\'ve got a cigarette in my mouth, a flask of wiskey in my pocket, and I\'ve already blown my entire life savings on the magical video poker machines which whisper to me as I walk by, You can Win, You can Win, You can Win, but as soon as I slide my crinkled $20 into the slot, it just winks at me in giant red letters:'].map(w => {
   const c = document.createElement('canvas'); c.width = 1536; c.height = 16; const t = c.getContext('2d'); t.fillStyle = '#fff'; t.font = '16px Courier New, Courier, monospace'; t.textBaseline = 'top'; t.fillText(w, 0, 0);
   const d = t.getImageData(0, 0, 1536, 16).data; return Uint8Array.from({ length: 0x6000 }, (_, i) => d[4 * i + 3] > 0x7f ? 0x65 : 0); }));
+// slot 14 overlay (0x4058d7): "heavy" Impact 150 px at (60,40), "TRAFFIC" Impact 200 px at (0,120), "reported" Impact 50 px at (0,270) in a 512x384 buffer, bytes (b&1)*0x65; canvas approximation
+{ const c = document.createElement('canvas'); c.width = 512; c.height = 384; const t = c.getContext('2d'); t.fillStyle = '#fff'; t.textBaseline = 'top';
+  for (const [w, sz, x, y] of [['heavy', 150, 60, 40], ['TRAFFIC', 200, 0, 120], ['reported', 50, 0, 270]]) { t.font = sz + 'px Impact, sans-serif'; t.fillText(w, x, y); }
+  const d = t.getImageData(0, 0, 512, 384).data; setOverlay14(Uint8Array.from({ length: 512 * 384 }, (_, i) => d[4 * i + 3] > 0x7f ? 0x65 : 0)); }
+// slot 3 text overlay (GDI Impact, CreateFont height 200 = cell height -> em ~164 px, TextOut at (x,0) on a 3584x200 DIB; byte = (coverage & 1) * 0x65, so only the LSB of the antialiased coverage survives): canvas approximation, same LSB rule
+setText3([['i am not feeling so coca cola today', 512], ['work consume sleep '.repeat(4), 0]].map(([w, x]) => { const c = document.createElement('canvas'); c.width = 3584; c.height = 200; const t = c.getContext('2d'); t.fillStyle = '#fff'; t.font = '164px Impact, sans-serif'; t.textBaseline = 'alphabetic'; t.fillText(w, x, 165);
+  const d = t.getImageData(0, 0, 3584, 200).data; return Uint8Array.from({ length: 3584 * 200 }, (_, i) => (d[4 * i + 3] & 1) * 0x65); }));
 const grain = () => Math.random() * 32 | 0;   // slot 24 (rand() in the original: not reproducible)
 function axAt(ms) { let lo = 0, hi = R.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (R[m] <= ms) lo = m; else hi = m - 1; } return ((lo >> 6) << 8) | (lo & 63); }
 function draw() {
