@@ -257,9 +257,9 @@ Update 5).</li>
 dump <code>web/assets/fx13.bin</code>, 4 x 196,608 bytes.</li>
 </ul>
 <h2 id="not-ported">Not ported</h2>
-<p>3D engine scenes (slots 10, 11, 14, 17, 18: shared software engine at
-0x407000-0x40bd00, mesh loader 0x407d80, polygon 0x407370, camera
-0x409a71), GDI text effects (16, 22, 23, 15, text overlays), rand-driven
+<p>3D engine scenes (slot 14 only now; 10, 11, 17, 18 are done: shared
+software engine at 0x407000-0x40bd00, mesh loader 0x407d80, polygon
+0x407370, camera 0x409a71), the slot 3 GDI text overlay, rand-driven
 slot 4. Slots 4, 5, 12, 15 and 18 are ported bit-exact against the
 original under Unicorn (grain off; slot 15 is a 256x256 voxel terrain
 marched per column with a sin-driven palette level, slot 18 three
@@ -269,11 +269,34 @@ Hermite-spline wire curves drawn with a 13-pixel brush, palette ramp
 palette level of the 11/13 era is still fitted to the golden run in
 <code>web/fx/compose.js</code>.</p>
 <ul>
-<li><strong>Slot 22 / 11 / 17</strong>: slot 22's glow LUT is exact once
-every product is rounded to f32. Slot 11 is a 102-mesh scene drawn with
-a custom flat triangle (type 199) and a Hermite keyframe camera; slot 17
-is a seeded-random particle effect. All three match Unicorn byte for
-byte. Slots 10, 14, 16, 23 remain unported.</li>
+<li><p><strong>Slot 22 / 11 / 17</strong>: slot 22's glow LUT is exact
+once every product is rounded to f32. Slot 11 is a 102-mesh scene drawn
+with a custom flat triangle (type 199) and a Hermite keyframe camera;
+slot 17 is a seeded-random particle effect. All three match Unicorn byte
+for byte. Slots 10, 16 and 23 are now ported too (see below); only slot
+14 and the slot 3 text overlay remain.</p></li>
+<li><p><strong>Slot 10, sprite ribbon</strong>: init builds 64 16x16
+sprites (sprite k has radius k/8, byte
+<code>0x40 - ftol(min(1, dist/r)*64)</code>). Each frame walks t from 0
+to 1.371 in steps of 1.5e-4 (about 9140 points), builds a direction from
+three sines (<code>vx = sin(u*...)</code>..., u = 50t), rotates it by an
+X/Y matrix (angles from the clock and from <code>sin(clock)*80</code>),
+scales it into a view and picks a sprite size from depth, then
+<code>paddusb</code>-blits 16x16 bytes (MMX). Bit-exact vs Unicorn with
+every x87 op rounded to f32 (<code>web/fx/slot10.js</code>). One trap:
+the angle is <code>(clock &amp; 0xffff) / 20</code>, the magic multiply
+0x66666667 followed by <code>sar 3</code> divides by 20, not
+10.</p></li>
+<li><p><strong>Slot 16 and 23, GDI text</strong>: both rasterise text
+into byte masks at init (slot 16: "anti", Arial bold 31 px, 128x32; slot
+23: five 1536x16 Courier lines) and then only do integer work per frame.
+Slot 16 re-seeds <code>rand</code> per frame, jitters each lit cell by
+<code>rand() % m - m/2</code> with <code>m = ftol(sin(t)*4.4+6)</code>
+and adds a 12x12 block with dword adds (byte carries leak between
+neighbours, modelled). Slot 23 adds 512-wide windows of the lines (value
+0x65, mod 256) scrolling 0.2 px/ms, 16 rows each, starting at row Y.
+Since the emulator's GDI draws nothing, the oracles feed synthetic masks
+(0 differing bytes) and the player uses canvas text.</p></li>
 </ul>
 </body>
 </html>

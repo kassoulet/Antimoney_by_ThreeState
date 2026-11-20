@@ -9,10 +9,13 @@ import * as s15 from './slot15.js';
 import * as s18 from './slot18.js';
 import * as s11 from './slot11.js';
 import * as s17 from './slot17.js';
+import * as s10 from './slot10.js';
+import * as s16 from './slot16.js';
+import * as s23 from './slot23.js';
 export const SCRIPT = [[0,2,2,2],[0,0,2,100],[0,24,0,1],[0,1,0,1],[0,3,0,1],[0,16,0,1],[512,16,0,0],[512,0,2,100],[512,3,0,0],[512,14,0,1],[544,14,6,1],[576,14,6,1],[1024,14,0,0],[1024,5,0,1],[1024,22,0,1],[1024,5,6,1],[1024,22,6,244],[1024,22,7,.14],[1536,5,0,0],[1536,22,0,0],[1536,4,0,1],[2048,4,0,0],[2048,0,2,100],[2048,12,0,1],[3072,12,0,0],[3072,0,2,255],[3072,11,0,1],[3072,13,0,1],[3072,13,6,0],[3104,13,6,1],[3328,13,6,2],[3360,13,6,3],[3456,13,0,0],[3456,11,0,0],[3456,0,2,100],[3456,3,0,1],[3456,3,7,1],[3456,3,6,256],[4096,3,0,0],[4096,23,0,1],[4096,22,6,244],[4096,22,7,.14],[4096,22,0,1],[4096,17,0,1],[4608,17,0,0],[4608,3,0,1],[4608,3,8,1],[4608,3,6,256],[5120,3,0,0],[5120,22,0,0],[5120,10,0,1],[5120,23,6,136],[5632,10,0,0],[5632,23,6,300],[5632,23,0,0],[5632,15,0,1],[6144,15,0,0],[6144,0,2,100],[6144,18,0,1]];
 // state at script position ax (order<<8|row) and clock ms: enabled slots, image index, palette level
 export function state(ax, ms) {
-  const on = new Set(), s = { on, img: 0, lvl: 0, len5c: 0, noText: true, glowS: 0xfe, glowF: Math.fround(0.14) };
+  const on = new Set(), s = { on, img: 0, lvl: 0, len5c: 0, noText: true, glowS: 0xfe, glowF: Math.fround(0.14), y23: 300 };
   for (const [t, slot, c, p] of SCRIPT) {
     if (t > ax) break;
     if (c === 0) { p === 1 ? on.add(slot) : on.delete(slot); }
@@ -20,6 +23,7 @@ export function state(ax, ms) {
     else if (slot === 3 && c === 7) s.noText = p === 0;    // 0x427269: text overlay mode (horizontal lines off; text itself not ported)
     else if (slot === 22 && c === 6) s.glowS = Math.trunc(p);   // step of the zoom
     else if (slot === 22 && c === 7) s.glowF = Math.fround(p);  // LUT slope
+    else if (slot === 23 && c === 6) s.y23 = p;               // 0x42b8a4: first row of the text lines (float, 300 at init)
     else if (slot === 13 && c === 6) s.img = p;
     else if (slot === 0 && c === 2) s.lvl = Math.trunc(p);
   }
@@ -38,7 +42,10 @@ const t0Of = t => Math.ceil(ROWS[(t >> 8 << 6) + (t & 63)] / 40) * 40 + 800 - 40
 let ROWS = null;
 export const setRows = r => { ROWS = r; };
 // slot 4: needs a 256x256 0/0xff text mask (GDI text in the original, blank under the emulator): the player supplies a canvas-rendered one; without it slot 4 draws nothing
-let MASK = null, TEX = null, PART = null, MAP15 = null, T15 = null;
+let M16 = null, S23 = null, SEED16 = null;
+// slot 16 mask (128x32, 0 / nonzero: "anti", Arial bold 31 px centred, GDI in the original) and slot 23 strips (5 x 0x6000 = 1536x16, 0 / 0x65: Courier 16 px lines); the player supplies canvas approximations
+export const setMask16 = m => { M16 = m; }; export const setStrips23 = s => { S23 = s; };
+let T10 = null, MASK = null, TEX = null, PART = null, MAP15 = null, T15 = null;
 export const setMask = m => { MASK = m; };
 // slot 18: three 512x160 text strips (0xc8 where the GDI text is: "work", "consume", "sleep" in Impact 160), added at row 96 by tracker position; the player supplies them
 // slot 11 clock: ms since its first enabled frame; +400 ms is FITTED on the golden frames (99.3-99.7% pixel agreement at that offset, the original's start clock is machine dependent)
@@ -50,6 +57,10 @@ const axOfClock = ms => { const R = ROWS || [0]; let lo = 0, hi = R.length - 1; 
 export function render(ax, ms, out, grain = null) {
   const s = state(ax, ms); out.fill(0);
   if (s.on.has(3)) star(ms, out, s.len5c, s.noText);
+  if (s.on.has(16) && ROWS && M16) {                               // jittering 12x12 blocks of the word; the 64 srand seeds come from the original's init rand(): here a seeded LCG
+    let x = 16; SEED16 ||= Array.from({ length: 64 }, () => (x = (Math.imul(x, 0x343fd) + 0x269ec3) | 0, (x >>> 16) & 0x7fff));
+    s16.frame({ d: out }, ms - t0Of(0), M16, SEED16);
+  }
   if (s.on.has(4) && ROWS && MASK) {                              // particles on the text mask, closed form after n frames from the enabling row
     const t0 = t0Of(0x600); TEX ||= sprite();
     let x = 1; PART ||= particles(() => (x = (x * 1103515245 + 12345) >>> 0, (x >>> 16) & 0x7fff));   // seeded rand: placement differs from the original run
@@ -70,10 +81,12 @@ export function render(ax, ms, out, grain = null) {
     if (STRIPS && st >= 0) s18.strip(out, STRIPS[st]);
   }
   if (s.on.has(5)) slot5(ms, Math.max(0, ax - 1), { d: out, pitch: 512, w: 512, h: 384 });   // textured sphere (0x40c282 returns the position - 1)
+  if (s.on.has(10) && ROWS) s10.frame({ d: out }, ms, t0Of(0x1400) + 40, T10 ||= s10.sprites());   // additive sprite ribbon; t0 = first enabled frame (0x402270)
   if (s.on.has(11) && ROWS && M11) s11.render(M11, t11(ms), { d: out, pitch: 512, w: 512, h: 384 });   // 102 flat meshes, keyframe camera, t0 = first enabled frame
   if (s.on.has(12) && ROWS) slot12(ms, ROWS[0x800 >> 8 << 6] + 800, axOfClock, { d: out, pitch: 512, w: 512, h: 384 });   // 3D snakes + cubes, additive 0x3f
   if (s.on.has(13)) images(s.img, out);
   if (s.on.has(22)) glow(out, s.glowS, s.glowF);                 // slot 22 runs after slots 0..21 and before 23, 24
+  if (s.on.has(23) && ROWS && S23) s23.frame({ d: out }, ms - (t0Of(0x1000) + 40), S23, s.y23);   // scrolling text lines, t0 = first enabled frame
   if (grain && s.on.has(24)) for (let i = 0; i < out.length; i++) out[i] = (out[i] + grain()) & 255;
   return s.lvl;
 }
